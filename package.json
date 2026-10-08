@@ -1,0 +1,76 @@
+{
+  "name": "pi-halo",
+  "version": "0.1.0",
+  "description": "An OpenCode-style TUI and engineering workflow tools for pi: right sidebar, one-line footer, Build/Plan modes, ctrl+x leader keys, ctrl+p command palette, a git diff view, git commands that draft commit messages and pull requests, and a widget API. The brand (name, mark, colours, startup art) is replaceable from another package.",
+  "type": "module",
+  "license": "MIT",
+  "author": "Zach Koncir <zach@one24.ai>",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/one24-ai/pi-halo.git"
+  },
+  "homepage": "https://github.com/one24-ai/pi-halo#readme",
+  "bugs": {
+    "url": "https://github.com/one24-ai/pi-halo/issues"
+  },
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "keywords": [
+    "pi-package",
+    "pi",
+    "pi-coding-agent",
+    "tui",
+    "git",
+    "coding-agent"
+  ],
+  "exports": {
+    "./client": "./extensions/halo/client.ts",
+    "./api": "./extensions/halo/api.ts",
+    "./brand": "./extensions/halo/brand.ts",
+    "./icons": "./extensions/halo/icons.ts",
+    "./aws": "./extensions/widgets/aws/resolve.ts",
+    "./provider": "./extensions/halo/provider.ts"
+  },
+  "pi": {
+    "extensions": [
+      "./extensions/halo/index.ts",
+      "./extensions/widgets/container/index.ts",
+      "./extensions/widgets/aws/index.ts",
+      "./extensions/widgets/mcp/index.ts",
+      "./extensions/widgets/todo/index.ts",
+      "./extensions/widgets/session-todos/index.ts",
+      "./extensions/widgets/subagents/index.ts",
+      "./extensions/diff/index.ts",
+      "./extensions/git/index.ts"
+    ]
+  },
+  "files": [
+    "extensions",
+    "scripts/link-pi.mjs",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE",
+    "THIRD_PARTY_NOTICES"
+  ],
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/",
+    "provenance": true
+  },
+  "scripts": {
+    "test": "node scripts/link-pi.mjs && node --experimental-strip-types --no-warnings --test test/*.test.ts",
+    "typecheck": "node scripts/link-pi.mjs && tsc --noEmit",
+    "link-pi": "node scripts/link-pi.mjs",
+    "check": "pnpm test && pnpm typecheck",
+    "release": "node scripts/release.mjs"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": ">=1.1.0 <1.2.0",
+    "@earendil-works/pi-tui": ">=1.1.0 <1.2.0"
+  },
+  "devDependencies": {
+    "@types/node": "24.10.1",
+    "typescript": "5.9.3"
+  }
+}

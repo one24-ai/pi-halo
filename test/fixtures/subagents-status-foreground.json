@@ -1,0 +1,44 @@
+{
+ "fleet": {
+  "version": 1,
+  "entries": [
+   {
+    "key": "fleet-1",
+    "agent": "delegate",
+    "model": "claude-opus-5-5",
+    "startedAt": 1790986950754,
+    "tokens": {
+     "input": 11928,
+     "output": 14,
+     "total": 11942,
+     "window": 11928,
+     "windowPeak": 11928
+    }
+   }
+  ],
+  "totalActive": 1,
+  "topLevelAsyncCapacity": {
+   "used": 0,
+   "limit": 0
+  },
+  "omitted": 0
+ },
+ "asyncSnapshot": {
+  "kind": "pi-subagents.async-status-snapshot",
+  "version": 1,
+  "generatedAt": 1790986988066,
+  "caps": {
+   "maxRuns": 20,
+   "maxChildrenPerNode": 8,
+   "maxDepth": 3,
+   "maxStringLength": 160,
+   "maxSerializedBytes": 32768
+  },
+  "omitted": {
+   "runs": 0,
+   "children": 0,
+   "byteLimitExceeded": false
+  },
+  "runs": []
+ }
+}

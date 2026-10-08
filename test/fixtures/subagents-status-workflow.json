@@ -1,0 +1,164 @@
+{
+ "fleet": {
+  "version": 1,
+  "entries": [
+   {
+    "key": "fleet-1",
+    "agent": "workflow",
+    "startedAt": 1790986835887,
+    "tokens": {
+     "input": 0,
+     "output": 0,
+     "total": 0
+    }
+   },
+   {
+    "key": "fleet-2",
+    "agent": "delegate",
+    "model": "anthropic/claude-opus-5-5",
+    "startedAt": 1790986836511,
+    "tokens": {
+     "input": 16108,
+     "output": 39,
+     "total": 16147,
+     "window": 16108,
+     "windowPeak": 16108
+    }
+   },
+   {
+    "key": "fleet-3",
+    "agent": "delegate",
+    "model": "anthropic/claude-opus-5-5",
+    "startedAt": 1790986836526,
+    "tokens": {
+     "input": 16128,
+     "output": 58,
+     "total": 16186,
+     "window": 16128,
+     "windowPeak": 16128
+    }
+   },
+   {
+    "key": "fleet-4",
+    "agent": "delegate",
+    "model": "anthropic/claude-opus-5-5",
+    "startedAt": 1790986836552,
+    "tokens": {
+     "input": 16106,
+     "output": 38,
+     "total": 16144,
+     "window": 16106,
+     "windowPeak": 16106
+    }
+   },
+   {
+    "key": "fleet-5",
+    "agent": "delegate",
+    "model": "anthropic/claude-opus-5-5",
+    "startedAt": 1790986836583,
+    "tokens": {
+     "input": 16134,
+     "output": 57,
+     "total": 16191,
+     "window": 16134,
+     "windowPeak": 16134
+    }
+   }
+  ],
+  "totalActive": 5,
+  "topLevelAsyncCapacity": {
+   "used": 0,
+   "limit": 0
+  },
+  "omitted": 0
+ },
+ "asyncSnapshot": {
+  "kind": "pi-subagents.async-status-snapshot",
+  "version": 1,
+  "generatedAt": 1790986862148,
+  "caps": {
+   "maxRuns": 20,
+   "maxChildrenPerNode": 8,
+   "maxDepth": 3,
+   "maxStringLength": 160,
+   "maxSerializedBytes": 32768
+  },
+  "omitted": {
+   "runs": 0,
+   "children": 0,
+   "byteLimitExceeded": false
+  },
+  "runs": [
+   {
+    "id": "8d3b8f9d-0024-450d-b48c-835a96c6ade8",
+    "kind": "workflow",
+    "label": "delegate, delegate, delegate, +1 more",
+    "state": "running",
+    "startedAt": 1790986835887,
+    "updatedAt": 1790986836007,
+    "children": [
+     {
+      "id": "build-api",
+      "kind": "step",
+      "label": "build-api",
+      "state": "running",
+      "startedAt": 1790986836507,
+      "updatedAt": 1790986859715,
+      "activity": {
+       "currentTool": "bash",
+       "lastActivityAt": 1790986859704,
+       "currentToolStartedAt": 1790986839694,
+       "turnCount": 1,
+       "toolCount": 1
+      }
+     },
+     {
+      "id": "build-web",
+      "kind": "step",
+      "label": "build-web",
+      "state": "running",
+      "startedAt": 1790986836522,
+      "updatedAt": 1790986853047,
+      "activity": {
+       "currentTool": "bash",
+       "lastActivityAt": 1790986853047,
+       "currentToolStartedAt": 1790986841029,
+       "turnCount": 1,
+       "toolCount": 1
+      }
+     },
+     {
+      "id": "lint",
+      "kind": "step",
+      "label": "lint",
+      "state": "running",
+      "startedAt": 1790986836549,
+      "updatedAt": 1790986855606,
+      "activity": {
+       "currentTool": "bash",
+       "lastActivityAt": 1790986855593,
+       "currentToolStartedAt": 1790986839582,
+       "turnCount": 1,
+       "toolCount": 1
+      }
+     },
+     {
+      "id": "test-unit",
+      "kind": "step",
+      "label": "test-unit",
+      "state": "running",
+      "startedAt": 1790986836579,
+      "updatedAt": 1790986856601,
+      "activity": {
+       "currentTool": "bash",
+       "lastActivityAt": 1790986856567,
+       "currentToolStartedAt": 1790986840557,
+       "turnCount": 1,
+       "toolCount": 1
+      }
+     }
+    ]
+   }
+  ]
+ }
+}
