@@ -4,6 +4,10 @@ All notable changes to pi-halo are listed here. The format follows [Keep a Chang
 
 ## [Unreleased]
 
+### Security
+
+- Releases are published by CI with npm trusted publishing (OIDC) and carry a provenance attestation. No npm token is stored in the repository.
+
 ## [0.1.0] - 2026-10-08
 
 First public release.
