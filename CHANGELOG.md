@@ -4,6 +4,10 @@ All notable changes to pi-halo are listed here. The format follows [Keep a Chang
 
 ## [Unreleased]
 
+### Changed
+
+- pi-halo describes itself as a workbench for pi (an interface, git workflows and a widget platform) instead of an OpenCode-style TUI, in the README and the npm description. OpenCode is credited as the inspiration for the interface.
+
 ## [0.2.0] - 2026-10-08
 
 ### Changed

@@ -1,7 +1,7 @@
 {
   "name": "pi-halo",
   "version": "0.2.0",
-  "description": "An OpenCode-style TUI and engineering workflow tools for pi: right sidebar, one-line footer, Build/Plan modes, ctrl+x leader keys, ctrl+p command palette, a git diff view, git commands that draft commit messages and pull requests, and a widget API. The brand (name, mark, colours, startup art) is replaceable from another package.",
+  "description": "A workbench for pi: an interface, git workflows and a widget platform for everyday engineering. Sidebar and home screen, Build/Plan modes, ctrl+x leader keys and a ctrl+p palette, a git diff view, git commands that draft commit messages and pull requests, and a widget and brand API for other packages.",
   "type": "module",
   "license": "MIT",
   "author": "Zach Koncir <zach@one24.ai>",
