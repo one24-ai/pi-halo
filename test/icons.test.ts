@@ -97,7 +97,7 @@ test("plain glyphs are one cell wide, or empty, or a short word", () => {
 	}
 	// The single-glyph icons used as markers are exactly one cell in the common monospace fonts.
 	const ONE_CELL = /^[\u0021-\u007e\u00d7\u2022\u2190-\u2193\u25a0\u25b2\u25cb\u25cf\u2590\u258c]$/u;
-	for (const name of ["provider", "levelOk", "levelWarn", "levelError", "levelOff", "levelInfo", "statusLsp", "statusGraphify", "capLeft", "capRight", "toolRead", "toolWrite", "toolEdit", "toolBash", "toolGrep", "toolFind", "toolLs", "toolMemory", "toolOther"] as const) {
+	for (const name of ["provider", "levelOk", "levelWarn", "levelError", "levelOff", "levelInfo", "statusLsp", "statusGraphify", "capLeft", "capRight", "toolRead", "toolWrite", "toolEdit", "toolBash", "toolGrep", "toolFind", "toolLs", "toolOther"] as const) {
 		assert.match(I.ICONS[name].plain, ONE_CELL, name);
 	}
 });

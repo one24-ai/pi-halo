@@ -10,9 +10,9 @@ import { TOOL_ICONS } from "../extensions/halo/tools.ts";
 
 process.env.PI_HALO_ICONS = "nerd"; // the plain set is checked in icons.test.ts
 
-test("every tool (and the memory tools, as one) has a distinct one-cell icon from the Nerd Font private-use range", () => {
+test("every built-in tool has a distinct one-cell icon from the Nerd Font private-use range", () => {
 	const names = Object.keys(TOOL_ICONS);
-	assert.deepEqual(names.sort(), ["bash", "edit", "find", "grep", "ls", "memory", "read", "write"]);
+	assert.deepEqual(names.sort(), ["bash", "edit", "find", "grep", "ls", "read", "write"]);
 	const glyphs = Object.values(TOOL_ICONS).map((n) => icon(n));
 	assert.equal(new Set(glyphs).size, glyphs.length, "no two tools share a glyph");
 	for (const g of glyphs) {

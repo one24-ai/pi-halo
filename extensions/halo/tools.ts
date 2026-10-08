@@ -8,18 +8,20 @@
  *
  * The rows are drawn by a renderer resolver (`pi.registerToolRenderer`), which chooses how calls to
  * a tool are drawn without touching the tool: pi's own definitions for read, bash, edit, write,
- * grep, find and ls, with their settings and the active tool set, stay as they are. The memory
- * tools from the memory extension are drawn the same way.
+ * grep, find and ls, with their settings and the active tool set, stay as they are. Tools that
+ * belong to other extensions are drawn the same way when that extension registered a row spec for
+ * them (`registerToolRows` in api.ts); halo knows no tool but pi's built-in ones by name.
  *
  * Everything shown comes from tool arguments and results, which a file, a web page or a model can
  * influence, so each piece of text is cleaned of escape sequences and control characters before it
  * is drawn (sanitize.ts).
  */
 
-import { type ExtensionAPI, renderDiff, type Theme } from "@earendil-works/pi-coding-agent";
+import { type ExtensionAPI, renderDiff, type Theme, type ToolRenderers } from "@earendil-works/pi-coding-agent";
 import { type Component, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import { relative } from "node:path";
-import { icon, type IconName } from "./icons.ts";
+import { noteToolRowFailure, toolRowBroken, toolRowFor, type ToolRowSpec } from "./api.ts";
+import { icon, type IconLike, type IconName, resolveIcon } from "./icons.ts";
 import { primary, sanitize, sanitizeLines, scrubText, shade, stripEscapes } from "./palette.ts";
 import { type BashOutput, bashPeek, foldLines, formatWallTime, LIVE_TAIL_LINES, liveTail, liveVisible, liveWaitMs, parseBashOutput } from "./bash-output.ts";
 import { diffStats } from "./session-info.ts";
@@ -33,7 +35,6 @@ export const TOOL_ICONS = {
 	grep: "toolGrep",
 	find: "toolFind",
 	ls: "toolLs",
-	memory: "toolMemory",
 } as const satisfies Record<string, IconName>;
 
 const PREVIEW_LINES = 12;
@@ -176,18 +177,18 @@ export function countLines(text: unknown): number {
 /** Indent body lines two columns, under the title text, as bash output is. */
 const indented = (lines: string[]) => lines.map((l) => `  ${l}`);
 
-/** The first `n` of `lines`, with a dim note of what is left and how to open it. */
-function clipped(lines: string[], n: number, theme: Theme, hint: boolean): string[] {
-	if (lines.length <= n) return lines;
-	const note = `… ${lines.length - n} more lines${hint ? " · ctrl+o or click to expand" : ""}`;
+/**
+ * The first `n` of `lines`, with a dim note of what is left and how to open it. `total` is the
+ * true number of lines when `lines` is only the start of a longer list.
+ */
+function clipped(lines: string[], n: number, theme: Theme, hint: boolean, total = lines.length): string[] {
+	if (total <= n) return lines;
+	const note = `… ${total - n} more lines${hint ? " · ctrl+o or click to expand" : ""}`;
 	return [...lines.slice(0, n), theme.fg("dim", note)];
 }
 
-/** The dim icon and a space, or nothing when the current icon set has none for this tool. */
-const callIcon = (theme: Theme, name: IconName) => {
-	const g = icon(name);
-	return g ? `${theme.fg("dim", g)} ` : "";
-};
+/** The dim glyph and a space, or nothing when the current icon set has none for this tool. */
+const callIcon = (theme: Theme, glyph: string) => (glyph ? `${theme.fg("dim", glyph)} ` : "");
 const name = (theme: Theme, s: string) => theme.fg("text", s);
 const arg = (theme: Theme, s: string) => theme.fg("muted", s);
 
@@ -201,7 +202,9 @@ interface RenderExtra {
 /** How one tool is drawn. Exported for tests. */
 export interface Spec {
 	/** An icon name (see TOOL_ICONS); the glyph is looked up when the row is drawn. */
-	icon: IconName;
+	icon?: IconName;
+	/** A glyph supplied by another extension, already cleaned (see `fromRowSpec`). Wins over `icon`. */
+	iconLike?: IconLike;
 	title: string;
 	describe: (args: any, cwd: string, theme: Theme) => string;
 	summarize: (result: any, args: any, theme: Theme, isError: boolean, extra?: RenderExtra) => string;
@@ -261,12 +264,6 @@ function errorLine(result: any, theme: Theme): string {
 	if (/operation was aborted|aborted/i.test(first)) return theme.fg("warning", "cancelled");
 	return theme.fg("error", first.length > 60 ? `${first.slice(0, 57)}…` : first);
 }
-
-/** One line of at most `n` columns: whitespace collapsed, cut with an ellipsis. */
-const clip = (s: string, n: number) => {
-	const one = sanitize(s).replace(/\s+/g, " ").trim();
-	return one.length > n ? `${one.slice(0, n - 1)}…` : one;
-};
 
 /** Exported for tests. */
 export const SPECS: Record<string, Spec> = {
@@ -381,53 +378,6 @@ export const SPECS: Record<string, Spec> = {
 		},
 		expand: (r, _a, t) => preview(textOf(r), t),
 	},
-	// The memory tools come from the memory extension, which draws them its own way. These specs
-	// restyle them to match the rest (see installToolRenderers).
-	memory_write: {
-		icon: TOOL_ICONS.memory,
-		title: "Remember",
-		describe: (a, _cwd, t) => `${t.fg("muted", sanitize(a?.kind ?? "memory"))}${a?.global ? t.fg("dim", " global") : ""} ${t.fg("text", clip(String(a?.text ?? ""), 70))}`,
-		summarize: (r, _a, t, err) => {
-			if (err) return errorLine(r, t);
-			const id = r.details?.id === undefined ? undefined : sanitize(r.details.id);
-			const again = r.details?.deduplicated ? " refreshed" : " saved";
-			return t.fg("success", id !== undefined ? `#${id}` : "saved") + (id !== undefined ? t.fg("dim", again) : "");
-		},
-		expand: (r, _a, t) => preview(textOf(r), t),
-	},
-	memory_update: {
-		icon: TOOL_ICONS.memory,
-		title: "Revise",
-		describe: (a, _cwd, t) => `${t.fg("muted", a?.id !== undefined ? `#${sanitize(a.id)}` : "memory")}${a?.text ? ` ${t.fg("text", clip(String(a.text), 70))}` : ""}`,
-		summarize: (r, _a, t, err) => (err ? errorLine(r, t) : t.fg("success", "updated")),
-		expand: (r, _a, t) => preview(textOf(r), t),
-	},
-	memory_forget: {
-		icon: TOOL_ICONS.memory,
-		title: "Forget",
-		describe: (a, _cwd, t) => `${t.fg("muted", a?.id !== undefined ? `#${sanitize(a.id)}` : "memory")}${a?.reason ? ` ${t.fg("text", clip(String(a.reason), 70))}` : ""}`,
-		summarize: (r, _a, t, err) => {
-			if (err) return errorLine(r, t);
-			const deleted = r.details?.deleted ?? /^Deleted/.test(textOf(r));
-			return deleted ? t.fg("success", "deleted") : t.fg("warning", "kept");
-		},
-		expand: (r, _a, t) => preview(textOf(r), t),
-	},
-	memory_search: {
-		icon: TOOL_ICONS.memory,
-		title: "Recall",
-		describe: (a, _cwd, t) => {
-			const q = a?.query ? t.fg("text", JSON.stringify(clip(String(a.query), 50))) : t.fg("muted", "recent");
-			const kinds = Array.isArray(a?.kinds) && a.kinds.length ? t.fg("dim", ` ${sanitize(a.kinds.join(", "))}`) : "";
-			return q + kinds;
-		},
-		summarize: (r, _a, t, err) => {
-			if (err) return errorLine(r, t);
-			const n = r.details?.count ?? (textOf(r).match(/^#\d+/gm) ?? []).length;
-			return t.fg("dim", `${n} ${n === 1 ? "memory" : "memories"}`);
-		},
-		expand: (r, _a, t) => preview(textOf(r), t),
-	},
 	ls: {
 		icon: TOOL_ICONS.ls,
 		title: "List",
@@ -467,6 +417,12 @@ function liveBody(
 	return spec.live(partial, theme, expanded);
 }
 
+/** The glyph a spec draws in the current icon set, or "" for none. A supplied glyph is held to two cells. */
+function glyphOf(spec: Spec): string {
+	if (spec.iconLike !== undefined) return truncateToWidth(resolveIcon(spec.iconLike) ?? "", 2);
+	return spec.icon ? icon(spec.icon) : "";
+}
+
 /** Exported for tests: the renderers for one tool spec. */
 export function makeRenderers(spec: Spec, getCwd: () => string) {
 	const describe = (args: any, theme: Theme, cwd: string) =>
@@ -477,7 +433,7 @@ export function makeRenderers(spec: Spec, getCwd: () => string) {
 		 * shell on every update, so renderResult hides the call row (shared via context.state).
 		 */
 		renderCall(args: any, theme: Theme, context: any): Component {
-			const row = new Row(theme, `${callIcon(theme, spec.icon)}${describe(args, theme, context?.cwd ?? getCwd())}`, theme.fg("dim", "…"), [], "plain");
+			const row = new Row(theme, `${callIcon(theme, glyphOf(spec))}${describe(args, theme, context?.cwd ?? getCwd())}`, theme.fg("dim", "…"), [], "plain");
 			if (context?.state) context.state.callRow = row;
 			return row;
 		},
@@ -503,8 +459,8 @@ export function makeRenderers(spec: Spec, getCwd: () => string) {
 				state.liveTimer = undefined;
 			}
 			const extra: RenderExtra = { isError, seconds };
-			const glyph = icon(spec.icon);
-			const mark = !glyph ? "" : isError ? `${theme.fg("error", glyph)} ` : options.isPartial ? `${primary(theme, glyph)} ` : callIcon(theme, spec.icon);
+			const glyph = glyphOf(spec);
+			const mark = !glyph ? "" : isError ? `${theme.fg("error", glyph)} ` : options.isPartial ? `${primary(theme, glyph)} ` : callIcon(theme, glyph);
 			const left = `${mark}${describe(args, theme, context?.cwd ?? getCwd())}`;
 			const right = options.isPartial ? theme.fg("dim", "running…") : spec.summarize(result, args, theme, isError, extra);
 			let body: string[] = [];
@@ -530,13 +486,133 @@ export function makeRenderers(spec: Spec, getCwd: () => string) {
 	};
 }
 
+/** The most lines a registered spec's `expand` may show before halo cuts the rest. */
+const ROW_EXPAND_LINES = 120;
+
+/** Text from another extension: escape sequences, control characters and bidi controls removed, one line, SGR kept. */
+const outside = (value: unknown): string => scrubText(value, true);
+
+function outsideIcon(like: IconLike | undefined): IconLike | undefined {
+	if (typeof like === "string") return scrubText(like);
+	if (like && typeof like === "object") return like.plain === undefined ? { nerd: scrubText(like.nerd) } : { nerd: scrubText(like.nerd), plain: scrubText(like.plain) };
+	return undefined;
+}
+
 /**
- * Draw the built-in tools and the memory tools with halo's rows. A resolver answers for these names
- * and passes every other tool to `next()`, so pi keeps the tool definitions, their settings (shell
- * prefix, shell path, image resizing) and which tools are active; only the drawing changes. The
- * resolver wins over a tool's own renderers.
+ * An internal spec for a row spec another extension registered. Everything the spec returns is
+ * cleaned here, so the row code below never sees raw text from outside. Exported for tests.
+ */
+export function fromRowSpec(row: ToolRowSpec): Spec {
+	return {
+		iconLike: outsideIcon(row.icon),
+		title: outside(row.title),
+		describe: (a, cwd, t) => outside(row.describe(a, cwd, t)),
+		summarize: (r, a, t, err) => outside(row.summarize(r, a, t, err)),
+		expand: row.expand
+			? (r, a, t) => {
+					const lines = row.expand!(r, a, t);
+					if (!Array.isArray(lines)) return [];
+					// Clean only what can be shown (the cap plus one, so the cut is seen), not a huge list.
+					return indented(clipped(lines.slice(0, ROW_EXPAND_LINES + 1).map(outside), ROW_EXPAND_LINES, t, false, lines.length));
+				}
+			: undefined,
+	};
+}
+
+/** Two components drawn one after the other. */
+function stacked(first: Component, second: Component): Component {
+	return {
+		invalidate() {
+			first.invalidate();
+			second.invalidate();
+		},
+		render: (width: number) => [...first.render(width), ...second.render(width)],
+	};
+}
+
+/**
+ * Renderers for a tool that belongs to another extension, drawn from the row spec it registered.
+ *
+ * If the spec throws, that frame is drawn by the tool's own renderers (`next()`). A throw while the
+ * call's arguments or output are still arriving (a partial frame) is not held against the spec:
+ * the next frame tries it again, since half-received arguments are often what it choked on. A
+ * throw on a finished call latches: the rest of that call is drawn by the tool's own renderers, and
+ * the failure is counted against the spec (see `toolRowBroken`; after a few, new calls skip it).
+ * When the tool has no renderers of its own, the error goes to pi, which draws its plain fallback.
+ *
+ * One limit: pi reads `renderShell` once, when it creates the row, and cannot change it later. A
+ * call that falls back after it started is therefore still inside halo's own shell (`"self"`);
+ * only a call that is resolved when the spec is already known to be broken gets the tool's shell.
+ */
+function rowRenderers(row: ToolRowSpec, next: () => ToolRenderers | undefined): ToolRenderers | undefined {
+	let inner: ReturnType<typeof makeRenderers>;
+	try {
+		inner = makeRenderers(fromRowSpec(row), () => process.cwd());
+	} catch {
+		return next(); // not usable: the tool's own renderers, with its own shell
+	}
+	// Per call: kept in the call's renderer state when pi gives one, else for this resolution.
+	let latchedHere = false;
+	const isLatched = (context: any): boolean => latchedHere || context?.state?.rowSpecFailed === true;
+	/** Hold a failure against the spec when the call is finished; the styled call row, if any, is dropped. */
+	const fail = (context: any, partial: boolean): void => {
+		if (partial) return;
+		latchedHere = true;
+		noteToolRowFailure(row);
+		if (context?.state) {
+			context.state.rowSpecFailed = true;
+			context.state.callRow = undefined;
+		}
+	};
+	return {
+		renderShell: "self",
+		renderCall(args, theme, context) {
+			if (!isLatched(context)) {
+				try {
+					return inner.renderCall(args, theme, context);
+				} catch {
+					// Partial while the arguments are still streaming (pi sets argsComplete when they are whole).
+					fail(context, context?.isPartial === true && context?.argsComplete !== true);
+				}
+			}
+			const render = next()?.renderCall;
+			if (!render) throw new Error("tool row spec failed and the tool has no renderer of its own");
+			return render(args, theme, context);
+		},
+		renderResult(result, options, theme, context) {
+			// Set while the styled call row is on screen (and hidden by a result that began to draw).
+			const styledCall = context?.state?.callRow !== undefined;
+			if (!isLatched(context)) {
+				try {
+					return inner.renderResult(result, options, theme, context);
+				} catch {
+					fail(context, options?.isPartial === true);
+				}
+			}
+			const own = next();
+			if (!own?.renderResult) throw new Error("tool row spec failed and the tool has no renderer of its own");
+			const body = own.renderResult(result, options, theme, context);
+			// pi drew the styled call row first; it is hidden now, so the tool's own call row takes its place.
+			return styledCall && own.renderCall ? stacked(own.renderCall(context?.args, theme, context), body) : body;
+		},
+	};
+}
+
+/**
+ * Draw the built-in tools with halo's rows, and any other tool whose extension registered a row
+ * spec (`registerToolRows`). A resolver answers for these
+ * names and passes every other tool to `next()`, so pi keeps the tool definitions, their settings
+ * (shell prefix, shell path, image resizing) and which tools are active; only the drawing changes.
+ * The resolver wins over a tool's own renderers. Halo's own specs win over a registered spec of
+ * the same name. The registered specs are looked up when a call first appears, so load order does
+ * not matter. A spec that has failed on several finished calls is skipped and the tool is drawn by
+ * its own renderers, shell included.
  */
 export function installToolRenderers(pi: ExtensionAPI): void {
 	const drawn = Object.fromEntries(Object.keys(SPECS).map((n) => [n, { ...makeRenderers(SPECS[n]!, () => process.cwd()), renderShell: "self" as const }]));
-	pi.registerToolRenderer((toolName, next) => drawn[toolName] ?? next());
+	pi.registerToolRenderer((toolName, next) => {
+		if (Object.hasOwn(drawn, toolName)) return drawn[toolName];
+		const row = toolRowFor(toolName);
+		return row && !toolRowBroken(row) ? rowRenderers(row, next) : next();
+	});
 }

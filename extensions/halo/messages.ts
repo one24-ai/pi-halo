@@ -28,7 +28,7 @@
  *    nothing visible renders no lines. While streaming the label stays (the thinking peek lives
  *    there). ctrl+t (pi's app.thinking.toggle) still shows full thinking.
  *
- * 4. Extension messages (CustomMessageComponent.render, e.g. [memory-recall], search results): pi
+ * 4. Extension messages (CustomMessageComponent.render, e.g. a recall notice from a memory extension): pi
  *    draws them in a full-width shaded box. OpenCode draws notices as a ┃ bar in a muted colour
  *    beside a panel-shaded block, like its revert/error notices, so the box's own background is
  *    replaced with the panel shade and a dim bar is added. Messages whose renderer draws a plain
@@ -123,9 +123,7 @@ export const PLAIN_MESSAGE_TYPES: Set<string> = (() => {
 	const g = globalThis as Record<symbol, unknown>;
 	const key = Symbol.for("halo.plainMessageTypes");
 	if (!(g[key] instanceof Set)) g[key] = new Set<string>();
-	const set = g[key] as Set<string>;
-	set.add("memory-recall");
-	return set;
+	return g[key] as Set<string>;
 })();
 
 /**

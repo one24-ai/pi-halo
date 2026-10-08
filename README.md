@@ -107,7 +107,7 @@ export default function (pi: ExtensionAPI) {
 
 Install its dependencies (`pnpm install`), then `pi install /path/to/my-widget`.
 
-- Widgets in other extensions should import `client.ts`, not `api.ts`. It only looks for halo on `globalThis`, so load order doesn't matter: a widget that registers before halo loads is queued and taken over when it does. Without halo installed, the widget falls back to a plain `ctx.ui.setStatus(id, "<icon> <label or title> <text>")` line, polled on `refreshMs` (no detail lines, colours or caching). It also checks the registry's `apiVersion`, so a halo with an older API is ignored rather than called wrongly. The package exports `./client`, `./api`, `./brand`, `./icons`, `./provider` and `./aws` for use from another package (`./icons` has `iconSet`, `safeGlyph` and the glyph table, for a brand or widget that wants to match the user's icon choice). Built-in widgets in this repo keep importing `api.ts`.
+- Widgets in other extensions should import `client.ts`, not `api.ts`. A package that cannot depend on pi-halo registers through `globalThis` instead (see [Adding a widget without depending on pi-halo](#adding-a-widget-without-depending-on-pi-halo)). It only looks for halo on `globalThis`, so load order doesn't matter: a widget that registers before halo loads is queued and taken over when it does. Without halo installed, the widget falls back to a plain `ctx.ui.setStatus(id, "<icon> <label or title> <text>")` line, polled on `refreshMs` (no detail lines, colours or caching). It also checks the registry's `apiVersion`, so a halo with an older API is ignored rather than called wrongly. The package exports `./client`, `./api`, `./brand`, `./icons`, `./provider` and `./aws` for use from another package (`./icons` has `iconSet`, `safeGlyph` and the glyph table, for a brand or widget that wants to match the user's icon choice). Built-in widgets in this repo keep importing `api.ts`.
 - An `icon` (on the widget or in the view) is either one string, used as given with a Nerd Font and dropped without one, or `{ nerd, plain }` to give one for each set. A string of ordinary characters such as `"CI"` survives in both. With no icon in the current set, a row shows its level marker or the bullet, and a section heading shows no glyph.
 - `render` returns `{ icon?, label?, text, color?, level? }`, or `undefined` to hide the widget. In the sidebar's status list a `level` shows as a marker: a check (`ok`), warning triangle (`warn`), cross (`error`), minus (`off`) or information circle (`info`), in that level's colour. `label` is shown only in the footer, because the sidebar uses `title` instead.
 - `color` takes theme tokens (`text`, `muted`, `accent`, `success`, `warning`, `error`) the brand colours (`brand`, `brandDark`, `plan`), or any `#RRGGBB` value. If omitted, `level` (`ok`, `warn`, `error`, `off`, `info`) picks the colour.
@@ -131,6 +131,102 @@ Install its dependencies (`pnpm install`), then `pi install /path/to/my-widget`.
 | `todo` | Open items from the repo's `TODO.md` (or `TODO`, `TODO.txt`), sidebar only, hidden when there's none |
 | `session-todos` | The latest todo list a todo-style tool reported in this session, sidebar only, hidden when nothing is open |
 | `subagents` | pi-subagents children for this session (see below), hidden until one runs. Running children show their model and token count, and a last line shows spawned-of-cap and the parallel limit |
+
+### Adding a widget without depending on pi-halo
+
+A package that should work with or without halo, and that does not want a dependency on it, can register through `globalThis` alone. This is the whole protocol; `pi-halo/client` is a typed wrapper around it (and adds the plain `setStatus` fallback).
+
+- The registry is `globalThis[Symbol.for("pi-halo/registry")]`. It exists once halo has loaded (and may exist earlier, created by another package that imports halo's `api`), so check the fields, not just the object.
+- `apiVersion` (a number) is the widget API version, 1 today. It changes only when `WidgetSpec` or the registry break. Use the registry only when `typeof registry.register === "function"` and `registry.apiVersion >= 1`.
+- `register(pi, spec, ctx?)` registers or replaces the widget with that `id` and returns `{ refresh(), dispose() }`. `spec` is the `WidgetSpec` described above.
+- Register from your `session_start` handler. By then every extension has loaded, so a missing registry means halo is not installed: show nothing (or your own `ctx.ui.setStatus`). pi collects the handlers for an event before it calls any of them, so the `session_start` listeners that `register` adds for the widget's timers miss the event that is already running; pass the handler's `ctx` as the third argument and halo uses it for the widget's first `update` and its timer. Registering again on a later `session_start` replaces the widget.
+- Everything the widget returns is cleaned of escape sequences and control characters before it is drawn, as for any widget.
+
+```ts
+// A pi package with no dependency on pi-halo: a "Memory" sidebar section.
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+
+export default function (pi: ExtensionAPI) {
+  const saved: Array<{ id: number; title: string; text: string }> = [];
+  let recalled = { count: 0, total: 0, chars: 0, budget: 2000 };
+
+  pi.on("session_start", async (_event, ctx) => {
+    const host = (globalThis as any)[Symbol.for("pi-halo/registry")];
+    if (typeof host?.register !== "function" || !(host.apiVersion >= 1)) return; // halo is absent: show nothing
+
+    host.register(
+      pi,
+      {
+        id: "memory",
+        title: "Memory",
+        sidebar: "section",          // its own section; the value sits beside the title
+        slots: ["sidebar"],
+        order: 60,
+        cacheKey: () => `${recalled.count}|${saved.length}`, // render and detail rerun only when this changes
+        render: () => ({ text: `${recalled.count} of ${recalled.total} recalled, ${recalled.chars} of ${recalled.budget} chars` }),
+        detail: () => saved.map((m) => `#${m.id} ${m.title}`), // the memories saved or changed this session
+        onDetailClick: async (index, clickCtx) => {
+          const m = saved[index];
+          if (m) await clickCtx.ui.editor(`Memory #${m.id}`, m.text); // the full text, in pi's own editor
+        },
+      },
+      ctx,
+    );
+    // Later, when the state changes: handle.refresh() (keep the return value of register).
+  });
+}
+```
+
+A widget that is not a status of its own, only detail lines, can return `{}` from `render`. Clicking a detail line calls `onDetailClick(index, ctx)` with the live session context, so the extension can show the full text with `ctx.ui` (an editor, a selector or a notification). `handle.refresh()` re-renders after the extension's own state changes (a memory was saved), and `cacheKey` must change with that state when it is used.
+
+### Tool rows for your extension's tools
+
+halo draws pi's built-in tools (read, write, edit, bash, grep, find, ls) as one-line rows. It knows no other tool by name. An extension can have its own tools drawn the same way by registering a row spec per tool name:
+
+```ts
+import { registerToolRows } from "pi-halo/client";
+
+const off = registerToolRows(
+  {
+    deploy_status: {
+      icon: { nerd: "\u{F0AD}", plain: "#" },
+      title: "Deploy",
+      describe: (args, _cwd, theme) => `${theme.fg("muted", String(args.env))} ${theme.fg("text", String(args.version))}`,
+      summarize: (result, _args, theme, isError) => (isError ? theme.fg("error", "failed") : theme.fg("success", String(result.details?.state ?? "done"))),
+      expand: (result) => (result.content ?? []).map((c) => c.text ?? ""), // optional: shown on ctrl+o
+    },
+  },
+  { id: "my-deploy-package" }, // see "Registering again" in the list below
+);
+// off() removes the rows again
+```
+
+The types:
+
+```ts
+interface ToolRowSpec {
+  icon?: IconLike;                                   // string, or { nerd, plain }; omit for none. In the plain set a string loses its Nerd Font characters, so "#" stays and "\u{F0AD}" shows nothing
+  title: string;                                     // before the description; may be ""
+  describe(args: any, cwd: string, theme: Theme): string;
+  summarize(result: ToolRowResult, args: any, theme: Theme, isError: boolean): string;
+  expand?(result: ToolRowResult, args: any, theme: Theme): string[];
+}
+interface ToolRowResult { content?: Array<{ type: string; text?: string }>; details?: any }
+type ToolRowSpecs = Record<string /* tool name */, ToolRowSpec>;
+interface ToolRowsOptions { id?: string }
+function registerToolRows(specs: ToolRowSpecs, options?: ToolRowsOptions): () => void; // pi-halo/client
+```
+
+- `args` and `result` come from the model and the tool, and a call is drawn while its arguments are still arriving, so a spec reads them defensively (`args?.query`).
+- Every string a spec returns is treated as untrusted: escape sequences, control characters and bidi controls are removed and line breaks become spaces. Colour from `theme` is kept. `expand` lines are indented and cut at 120 (only the lines that can be shown are cleaned; the "N more lines" note counts all of them).
+- An entry is used only if `title` is a string, `describe` and `summarize` are functions, and `expand` is a function when given. Any other entry is skipped and the rest of the group still registers.
+- A spec that throws costs only that frame: it is drawn by the tool's own renderers instead, and when the tool has none, by pi's plain fallback. A throw while the call's arguments or output are still arriving is not held against the call (the next frame tries the spec again). A throw on a finished call latches: the rest of that call uses the tool's own renderers. After a spec has failed on three finished calls, new calls skip it, so the tool is drawn entirely by its own renderers; registering the spec again gives it a fresh start. Limit: pi reads a tool's `renderShell` once, when it creates the row, so a call that falls back after it started stays inside halo's shell (no padding or background of the tool's own); only a call created after the spec is known to be broken gets the tool's own shell.
+- Registering again: a package that registers on every `session_start`, or that /reload loads again, passes an `id` (`registerToolRows(specs, { id: "my-package" })`), and registering with the same id replaces its earlier group instead of piling up another. Without an `id`, keep the returned remover and call it (for example on `session_shutdown`) before registering again, or each call adds a group that lives until the process ends.
+- Order does not matter. The spec is looked up when a call is drawn, so the tool's extension, the extension registering the rows and halo can load in any order, and rows registered before halo loads are queued and taken over when it does. A call already on screen keeps the renderer it started with. With halo absent, `registerToolRows` does nothing and the tools keep their own rows.
+- halo's own rows for the built-in tools always win: a spec registered under one of those names is ignored. For any other name the most recent registration wins, and removing it brings back the one before.
+- Dependency-free: `globalThis[Symbol.for("pi-halo/registry")]` has `toolRowsVersion` (a number, 1 today, raised only when `registerToolRows` or `ToolRowSpec` break) and `registerToolRows(specs, { id }?)`, which returns the remover. When `typeof registry.registerToolRows === "function"` and `registry.toolRowsVersion >= 1`, call it. Otherwise halo has not loaded yet (or is too old): push `{ specs, id, attach(remove) {} }` (`id` optional, as above) onto the array at `globalThis[Symbol.for("pi-halo/pendingToolRows")]` (create it with `[]` if it is missing) and halo registers it when it loads, calling `attach` with the remover. A package that wants to react to halo being absent checks at `session_start`, when every extension has loaded.
+
+Message types that draw a plain row of their own (no panel or bar from halo) are added the same way, through the shared set at `globalThis[Symbol.for("halo.plainMessageTypes")]`.
 
 ### Diff view API
 

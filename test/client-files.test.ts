@@ -28,10 +28,10 @@ test("client.ts runs from a folder holding only the four files its header names"
 		}
 		const out = execFileSync(
 			"node",
-			["--experimental-strip-types", "--no-warnings", "--input-type=module", "-e", `const c = await import(${JSON.stringify(join(dir, "halo/client.ts"))}); console.log(["registerWidget","registerBrand","registerProviderStatus","requestRender","addDiffAction","openDiff"].map((n) => typeof c[n]).join(","));`],
+			["--experimental-strip-types", "--no-warnings", "--input-type=module", "-e", `const c = await import(${JSON.stringify(join(dir, "halo/client.ts"))}); console.log(["registerWidget","registerToolRows","registerBrand","registerProviderStatus","requestRender","addDiffAction","openDiff"].map((n) => typeof c[n]).join(","));`],
 			{ encoding: "utf8", cwd: dir },
 		);
-		assert.equal(out.trim(), "function,function,function,function,function,function");
+		assert.equal(out.trim(), "function,function,function,function,function,function,function");
 	} finally {
 		rmSync(dir, { recursive: true, force: true });
 	}

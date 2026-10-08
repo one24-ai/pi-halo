@@ -100,10 +100,6 @@ test("tool rows: arguments, previews and error lines are neutralised in every to
 		["grep", { pattern: NASTY, path: NASTY, glob: NASTY }, { content: [{ type: "text", text: NASTY }] }],
 		["find", { pattern: NASTY, path: NASTY }, { content: [{ type: "text", text: NASTY }] }],
 		["ls", { path: NASTY }, { content: [{ type: "text", text: NASTY }] }],
-		["memory_write", { kind: NASTY, text: NASTY }, { content: [{ type: "text", text: NASTY }], details: { id: NASTY } }],
-		["memory_update", { id: NASTY, text: NASTY }, { content: [{ type: "text", text: NASTY }] }],
-		["memory_forget", { id: NASTY, reason: NASTY }, { content: [{ type: "text", text: NASTY }], details: { deleted: true } }],
-		["memory_search", { query: NASTY, kinds: [NASTY] }, { content: [{ type: "text", text: NASTY }], details: { count: 1 } }],
 	];
 	for (const [name, args, result] of rows) {
 		for (const isError of [false, true]) {

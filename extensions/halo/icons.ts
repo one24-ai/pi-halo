@@ -61,7 +61,6 @@ export const ICONS = {
 	toolGrep: { nerd: "\u{F0349}", plain: "?" }, // magnify
 	toolFind: { nerd: "\u{F0C7D}", plain: "*" }, // file-search-outline
 	toolLs: { nerd: "\u{F0256}", plain: "/" }, // folder-outline
-	toolMemory: { nerd: "\u{F09D1}", plain: "#" }, // brain
 	toolOther: { nerd: "\uF013", plain: "\u2022" }, // fontawesome cog: a tool with no spec of its own
 	// turn telemetry: the words beside them say it
 	telSpeed: { nerd: "\u{F04C5}", plain: "" }, // speedometer
