@@ -26,14 +26,17 @@
  */
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import type { PendingRegistration, Registry, WidgetHandle, WidgetSpec } from "./api.ts";
+import type { PendingRegistration, PendingToolRows, Registry, ToolRowSpecs, WidgetHandle, WidgetSpec } from "./api.ts";
 import { type BrandSpec, setBrand } from "./brand.ts";
 import { type ProviderStatusSpec, setProviderStatus } from "./provider.ts";
 
 /** The registry API version this client was written for. */
 export const CLIENT_API_VERSION = 1;
+/** The tool row API version this client was written for (`toolRowsVersion` on the registry). */
+export const CLIENT_TOOL_ROWS_VERSION = 1;
 const REGISTRY = Symbol.for("pi-halo/registry");
 const PENDING = Symbol.for("pi-halo/pending");
+const PENDING_TOOL_ROWS = Symbol.for("pi-halo/pendingToolRows");
 const DEFAULT_UPDATE_TIMEOUT_MS = 10_000;
 
 type Host = Required<Pick<Registry, "register">>;
@@ -115,8 +118,15 @@ function startFallback(spec: WidgetSpec, ctx: ExtensionContext): Fallback {
 	};
 }
 
-/** Register (or replace) a widget with halo if present, else show it as a plain status. */
-export function registerWidget(pi: ExtensionAPI, spec: WidgetSpec): WidgetHandle {
+/**
+ * Register (or replace) a widget with halo if present, else show it as a plain status.
+ *
+ * Call it from the extension's default export. If you call it from inside a `session_start`
+ * handler instead (to be sure every extension has loaded), pass that handler's `ctx`: the widget
+ * missed that session's `session_start` event, and `ctx` lets halo run its first `update` and
+ * start its timer now. A call made there when halo is not installed shows nothing.
+ */
+export function registerWidget(pi: ExtensionAPI, spec: WidgetSpec, ctx?: ExtensionContext): WidgetHandle {
 	let real: WidgetHandle | undefined;
 	let fallback: Fallback | undefined;
 	let disposed = false;
@@ -147,7 +157,7 @@ export function registerWidget(pi: ExtensionAPI, spec: WidgetSpec): WidgetHandle
 
 	const host = findHost();
 	if (host) {
-		real = host.register(pi, spec);
+		real = host.register(pi, spec, ctx);
 		return handle;
 	}
 
@@ -178,6 +188,54 @@ export function registerWidget(pi: ExtensionAPI, spec: WidgetSpec): WidgetHandle
 		fallback = undefined;
 	}));
 	return handle;
+}
+
+/**
+ * Draw the rows of tools that belong to your extension the way halo draws its built-in tool rows:
+ * one line per call, an icon, a title, a short description and a right-aligned outcome, with an
+ * expanded view on ctrl+o. Keyed by tool name. Returns a function that removes the rows again.
+ *
+ *     registerToolRows({
+ *       deploy_status: {
+ *         icon: { nerd: "\u{F0AD}", plain: "#" },
+ *         title: "Deploy",
+ *         describe: (args, _cwd, theme) => theme.fg("muted", String(args.env)),
+ *         summarize: (result) => String(result.details?.state ?? "done"),
+ *       },
+ *     });
+ *
+ * It works whichever package loads first (rows registered before halo loads are queued and taken
+ * over when it does) and does nothing when halo is not installed: the tools keep their own rows.
+ * halo draws the built-in tools (read, write, edit, bash, grep, find, ls) itself and ignores a spec
+ * for those names. See ToolRowSpec in api.ts for what a spec may return.
+ */
+export function registerToolRows(specs: ToolRowSpecs): () => void {
+	let undo: (() => void) | undefined;
+	let removed = false;
+	const reg = (globalThis as unknown as Record<symbol, Registry | undefined>)[REGISTRY];
+	if (typeof reg?.registerToolRows === "function" && typeof reg.toolRowsVersion === "number" && reg.toolRowsVersion >= CLIENT_TOOL_ROWS_VERSION) {
+		undo = reg.registerToolRows(specs);
+	} else {
+		const g = globalThis as unknown as Record<symbol, PendingToolRows[] | undefined>;
+		const entry: PendingToolRows = {
+			specs,
+			attach: (unregister) => {
+				undo = unregister;
+				if (removed) unregister();
+			},
+		};
+		(g[PENDING_TOOL_ROWS] ??= []).push(entry);
+		undo = () => {
+			const list = g[PENDING_TOOL_ROWS];
+			const i = list ? list.indexOf(entry) : -1;
+			if (i >= 0) list!.splice(i, 1);
+		};
+	}
+	return () => {
+		if (removed) return;
+		removed = true;
+		undo?.();
+	};
 }
 
 /**
@@ -217,4 +275,5 @@ export type { DiffAction, DiffActionContext, DiffFileInfo, DiffHunkInfo, OpenDif
 export type { ProviderMeter, ProviderStatusSpec } from "./provider.ts";
 export type { BrandColors, BrandSpec, BrandSurfaces } from "./brand.ts";
 export type { IconLike } from "./icons.ts";
+export type { ToolRowResult, ToolRowSpec, ToolRowSpecs } from "./api.ts";
 export type { WidgetAction, WidgetHandle, WidgetSpec, WidgetView, WidgetRenderContext, WidgetSlot, WidgetColor, WidgetLevel } from "./api.ts";

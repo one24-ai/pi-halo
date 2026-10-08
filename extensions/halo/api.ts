@@ -196,6 +196,39 @@ interface RegistryEntry {
 	lastRenderMs?: number;
 }
 
+/** The result of a tool call as a tool row spec sees it. Anything in it can be influenced from outside. */
+export interface ToolRowResult {
+	content?: Array<{ type: string; text?: string }>;
+	details?: any;
+}
+
+/**
+ * How halo draws the rows of a tool that belongs to another extension: one line per call
+ * ("<icon> <title> <describe>" on the left, `summarize` on the right) and, when the row is opened
+ * with ctrl+o, the lines `expand` returns.
+ *
+ * `args` and `result` come from the model and the tool, so treat them as untrusted and possibly
+ * partial: a call is drawn while its arguments are still streaming. Every string a spec returns is
+ * cleaned before it is drawn (escape sequences, control characters and bidi controls removed, line
+ * breaks turned into spaces; SGR colour from `theme` is kept), and a spec that throws makes halo
+ * draw that call with the tool's own renderer instead.
+ */
+export interface ToolRowSpec {
+	/** Glyph in front of the row. A string is used as given with a Nerd Font and dropped without one; `{ nerd, plain }` gives one for each icon set. Omit for no glyph. */
+	icon?: IconLike;
+	/** Short verb or noun before the description, drawn in the text colour. May be empty. */
+	title: string;
+	/** What the call is about, from its arguments: a path, a query, an id. One line. */
+	describe: (args: any, cwd: string, theme: Theme) => string;
+	/** The right-aligned outcome of a finished call, for example "3 matches". `isError` is whether the tool reported an error. One line. */
+	summarize: (result: ToolRowResult, args: any, theme: Theme, isError: boolean) => string;
+	/** Body lines shown when the row is opened (ctrl+o or a click). More than 120 lines are cut. */
+	expand?: (result: ToolRowResult, args: any, theme: Theme) => string[];
+}
+
+/** Tool row specs by tool name. */
+export type ToolRowSpecs = Record<string, ToolRowSpec>;
+
 /** Shared state between halo and widget extensions. */
 export interface Registry {
 	widgets: Map<string, RegistryEntry>;
@@ -211,12 +244,25 @@ export interface Registry {
 	disabled: Set<string>;
 	/** Set by halo's `installHost()`: the version of this API. Absent when halo isn't loaded. */
 	apiVersion?: number;
-	/** Set by `installHost()`: what client.ts calls to register a widget with the host. */
-	register?: (pi: ExtensionAPI, spec: WidgetSpec) => WidgetHandle;
+	/**
+	 * Set by `installHost()`: what client.ts calls to register a widget with the host. `ctx` is
+	 * optional: a caller inside a `session_start` handler passes the handler's context, so the
+	 * widget's first `update` and its timer start even if halo's own handler has not run yet.
+	 */
+	register?: (pi: ExtensionAPI, spec: WidgetSpec, ctx?: ExtensionContext) => WidgetHandle;
+	/** Set by `installHost()`: the version of the tool row API. Absent when the host predates it, so a client can feature-detect. */
+	toolRowsVersion?: number;
+	/** Set by `installHost()`: registers tool row specs and returns a function that removes them. */
+	registerToolRows?: (specs: ToolRowSpecs) => () => void;
+	/** Registered tool row groups, oldest first. Read through `toolRowFor`. */
+	toolRows: Array<Map<string, ToolRowSpec>>;
 }
 
 /** Bumped on a breaking change to the registry or WidgetSpec; client.ts checks it. */
 export const API_VERSION = 1;
+
+/** Version of the tool row API (`registerToolRows`). Bumped on a breaking change to it or to ToolRowSpec. */
+export const TOOL_ROWS_VERSION = 1;
 
 /** A registration made (through client.ts) before halo had loaded. */
 export interface PendingRegistration {
@@ -226,12 +272,26 @@ export interface PendingRegistration {
 	attach(handle: WidgetHandle): void;
 }
 
+/** Tool rows registered (through client.ts or the raw protocol) before halo had loaded. */
+export interface PendingToolRows {
+	specs: ToolRowSpecs;
+	/** Hands the host's unregister function back to the registrant once the host has taken the rows. */
+	attach(unregister: () => void): void;
+}
+
 const PENDING = Symbol.for("pi-halo/pending");
+const PENDING_TOOL_ROWS = Symbol.for("pi-halo/pendingToolRows");
 
 function pendingList(): PendingRegistration[] {
 	const g = globalThis as unknown as Record<symbol, PendingRegistration[] | undefined>;
 	g[PENDING] ??= [];
 	return g[PENDING]!;
+}
+
+function pendingToolRowsList(): PendingToolRows[] {
+	const g = globalThis as unknown as Record<symbol, PendingToolRows[] | undefined>;
+	g[PENDING_TOOL_ROWS] ??= [];
+	return g[PENDING_TOOL_ROWS]!;
 }
 
 /** Register everything that client.ts queued before the host loaded. */
@@ -240,6 +300,13 @@ export function drainPending(): void {
 	for (const item of list) {
 		try {
 			item.attach(registerWidget(item.pi, item.spec));
+		} catch {
+			// one bad registration must not stop the others
+		}
+	}
+	for (const item of pendingToolRowsList().splice(0)) {
+		try {
+			item.attach(registerToolRows(item.specs));
 		} catch {
 			// one bad registration must not stop the others
 		}
@@ -254,6 +321,8 @@ export function installHost(): void {
 	const reg = getRegistry();
 	reg.apiVersion = API_VERSION;
 	reg.register = registerWidget;
+	reg.toolRowsVersion = TOOL_ROWS_VERSION;
+	reg.registerToolRows = registerToolRows;
 	drainPending();
 }
 
@@ -301,10 +370,51 @@ export function getRegistry(): Registry {
 		listeners: new Set(),
 		version: 0,
 		disabled: loadDisabled(),
+		toolRows: [],
 	};
 	// A registry created by an older halo in the same process lacks newer fields.
 	g[KEY]!.disabled ??= loadDisabled();
+	g[KEY]!.toolRows ??= [];
 	return g[KEY]!;
+}
+
+/**
+ * Register halo-styled rows for tools that belong to another extension, by tool name. Returns a
+ * function that removes them (calling it twice is harmless).
+ *
+ * The rows are looked up when a call is drawn, so it does not matter whether the extension that
+ * owns the tool, the one registering the rows or halo loads first. A call already on screen keeps
+ * the renderer it was created with.
+ *
+ * halo's own rows for pi's built-in tools (read, write, edit, bash, grep, find, ls) always win: a
+ * spec registered under one of those names is never used. For any other name the most recently
+ * registered spec wins, and removing it brings back the one before it. Entries that are not specs
+ * are ignored.
+ */
+export function registerToolRows(specs: ToolRowSpecs): () => void {
+	const reg = getRegistry();
+	const group = new Map<string, ToolRowSpec>();
+	for (const [name, spec] of Object.entries(specs ?? {})) {
+		if (name && spec && typeof spec === "object") group.set(name, spec);
+	}
+	reg.toolRows.push(group);
+	reg.requestRender();
+	return () => {
+		const i = reg.toolRows.indexOf(group);
+		if (i < 0) return;
+		reg.toolRows.splice(i, 1);
+		reg.requestRender();
+	};
+}
+
+/** The registered row spec for a tool, newest registration first, or undefined. */
+export function toolRowFor(toolName: string): ToolRowSpec | undefined {
+	const groups = getRegistry().toolRows;
+	for (let i = groups.length - 1; i >= 0; i--) {
+		const spec = groups[i]!.get(toolName);
+		if (spec) return spec;
+	}
+	return undefined;
 }
 
 /** Make every widget render again (an icon set change, say), dropping cached output. */
@@ -389,9 +499,13 @@ function stopTimer(entry: RegistryEntry): void {
  *
  * Pass `pi` so the widget's timers follow the session lifecycle: they start on session_start and
  * stop on session_shutdown. The widget itself stays registered across /reload of halo.
+ *
+ * Registering from inside a `session_start` handler (as a package that does not import halo does)
+ * misses that session's own `session_start` event for the widget, so pass the handler's `ctx`.
  */
-export function registerWidget(pi: ExtensionAPI, spec: WidgetSpec): WidgetHandle {
+export function registerWidget(pi: ExtensionAPI, spec: WidgetSpec, ctx?: ExtensionContext): WidgetHandle {
 	const reg = getRegistry();
+	if (ctx) reg.ctx ??= ctx;
 	const old = reg.widgets.get(spec.id);
 	if (old) {
 		stopTimer(old);
