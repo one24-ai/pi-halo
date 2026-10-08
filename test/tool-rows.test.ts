@@ -65,7 +65,7 @@ function draw(renderers: any, args: any, result: any, { expanded = false, isErro
 
 function reset(): void {
 	const reg = api.getRegistry();
-	reg.toolRows.length = 0;
+	reg.toolRows = [];
 	reg.apiVersion = undefined;
 	reg.register = undefined;
 	reg.toolRowsVersion = undefined;
@@ -112,7 +112,7 @@ test("a spec is looked up when a call is drawn, so registering after halo instal
 	off();
 	assert.equal(resolve(resolvers, "late_tool", sentinel), sentinel, "removed: back to the tool's own renderers");
 	off(); // twice is harmless
-	assert.equal(api.getRegistry().toolRows.length, 0);
+	assert.equal(api.toolRowGroups().length, 0);
 });
 
 test("the newest registration of a name wins and removing it brings back the one before", () => {
@@ -339,13 +339,160 @@ test("a spec that throws for a tool with no renderers of its own raises, so pi d
 	assert.throws(() => got.renderResult(ok("x"), { expanded: false, isPartial: false }, theme, ctx), /no renderer of its own/);
 });
 
-test("entries that are not specs are ignored", () => {
+test("entries that are not specs are skipped: title must be a string, describe and summarize functions, expand a function if given", () => {
 	api.installHost();
-	const off = api.registerToolRows({ ok_tool: deployRow(), nothing: undefined as any, text: "x" as any });
+	const off = api.registerToolRows({
+		ok_tool: deployRow(),
+		nothing: undefined as any,
+		text: "x" as any,
+		empty: {} as any,
+		no_describe: deployRow({ describe: undefined as any }),
+		no_summarize: deployRow({ summarize: "done" as any }),
+		no_title: deployRow({ title: undefined as any }),
+		bad_expand: deployRow({ expand: [] as any }),
+	});
 	assert.ok(api.toolRowFor("ok_tool"));
-	assert.equal(api.toolRowFor("nothing"), undefined);
-	assert.equal(api.toolRowFor("text"), undefined);
+	for (const name of ["nothing", "text", "empty", "no_describe", "no_summarize", "no_title", "bad_expand"]) assert.equal(api.toolRowFor(name), undefined, name);
+	assert.ok(api.toolRowFor("ok_tool"), "one bad entry does not drop the good ones");
 	off();
+});
+
+test("an owner id replaces that registrant's earlier group, so /reload and a new session do not pile groups up", () => {
+	api.installHost();
+	api.registerToolRows({ t: deployRow({ title: "One" }) }, { id: "pkg" });
+	api.registerToolRows({ t: deployRow({ title: "Two" }), u: deployRow() }, { id: "pkg" });
+	assert.equal(api.toolRowGroups().length, 1);
+	assert.equal(api.toolRowFor("t")!.title, "Two");
+	const other = api.registerToolRows({ t: deployRow({ title: "Other" }) }, { id: "other" });
+	assert.equal(api.toolRowGroups().length, 2);
+	const idless = api.registerToolRows({ v: deployRow() });
+	api.registerToolRows({ v: deployRow() });
+	assert.equal(api.toolRowGroups().length, 4, "calls without an id each add a group");
+	idless();
+	other();
+	assert.equal(api.toolRowGroups().length, 2);
+	// The remover of a replaced group does not remove the group that replaced it.
+	const first = api.registerToolRows({ w: deployRow() }, { id: "again" });
+	api.registerToolRows({ w: deployRow({ title: "Newer" }) }, { id: "again" });
+	first();
+	assert.equal(api.toolRowFor("w")!.title, "Newer");
+});
+
+test("an owner id is carried through the client, both directly and through the pending queue", () => {
+	// Queued: the second registration with the same id replaces the first once halo takes both.
+	client.registerToolRows({ q: deployRow({ title: "First" }) }, { id: "pkg" });
+	client.registerToolRows({ q: deployRow({ title: "Second" }) }, { id: "pkg" });
+	assert.equal(g[PENDING_TOOL_ROWS].length, 2);
+	assert.equal(g[PENDING_TOOL_ROWS][0].id, "pkg");
+	api.installHost();
+	assert.equal(api.toolRowGroups().length, 1);
+	assert.equal(api.toolRowFor("q")!.title, "Second");
+	// Direct.
+	client.registerToolRows({ q: deployRow({ title: "Third" }) }, { id: "pkg" });
+	assert.equal(api.toolRowGroups().length, 1);
+	assert.equal(api.toolRowFor("q")!.title, "Third");
+});
+
+test("an older registry without the toolRows field still works (it is created on first use)", () => {
+	delete (api.getRegistry() as any).toolRows;
+	assert.deepEqual(api.toolRowGroups(), []);
+	api.installHost();
+	const off = api.registerToolRows({ x: deployRow() });
+	assert.ok(api.toolRowFor("x"));
+	off();
+});
+
+test("expand: only the lines that can be shown are cleaned, and the note counts every line", () => {
+	api.installHost();
+	const { pi, resolvers } = fakePi();
+	installToolRenderers(pi);
+	let cleaned = 0;
+	const lines = Array.from({ length: 5000 }, (_, i) => ({ toString: () => (cleaned++, `line ${i + 1}`) }) as unknown as string);
+	api.registerToolRows({ big_tool: deployRow({ expand: () => lines }) });
+	const got = resolve(resolvers, "big_tool");
+	const ctx: any = { args: { env: "e", version: "v" }, state: {}, cwd: "/repo", isError: false, invalidate() {} };
+	const open = got.renderResult(ok("x"), { expanded: true, isPartial: false }, theme, ctx).render(100).map(strip);
+	assert.ok(cleaned <= 121, `cleaned ${cleaned} lines`);
+	assert.ok(open.some((l: string) => /… 4880 more lines/.test(l)), open.slice(-2).join("|"));
+	assert.ok(open.some((l: string) => l.includes("line 120")) && !open.some((l: string) => l.includes("line 121")));
+});
+
+test("a throw on a partial frame does not demote the call: the next frame tries the spec again", () => {
+	api.installHost();
+	const { pi, resolvers } = fakePi();
+	installToolRenderers(pi);
+	const own = {
+		renderCall: () => ({ invalidate() {}, render: () => ["OWN CALL"] }),
+		renderResult: () => ({ invalidate() {}, render: () => ["OWN RESULT"] }),
+	};
+	// describe chokes while the arguments are still arriving.
+	api.registerToolRows({
+		stream_tool: deployRow({
+			describe: (a: any, _c: string, t: any) => {
+				if (typeof a?.env !== "string") throw new Error("env is not here yet");
+				return t.fg("muted", a.env);
+			},
+		}),
+	});
+	const got = resolve(resolvers, "stream_tool", own);
+	const state: any = {};
+	const partialCtx: any = { args: {}, state, cwd: "/repo", isError: false, isPartial: true, argsComplete: false, invalidate() {} };
+	assert.deepEqual(got.renderCall({}, theme, partialCtx).render(80), ["OWN CALL"], "this frame falls back");
+	assert.notEqual(state.rowSpecFailed, true, "but is not held against the call");
+	const doneCtx: any = { ...partialCtx, args: { env: "staging" }, isPartial: true, argsComplete: true };
+	assert.ok(got.renderCall({ env: "staging" }, theme, doneCtx).render(80).map(strip).join("").includes("Deploy"), "arguments complete: the styled row is back");
+	// A partial result that throws is retried too, and the final result is styled.
+	let calls = 0;
+	api.registerToolRows({
+		half_tool: deployRow({
+			summarize: () => {
+				if (++calls === 1) throw new Error("half a result");
+				return "done";
+			},
+		}),
+	});
+	const h = resolve(resolvers, "half_tool", own);
+	const hs: any = {};
+	const hctx: any = { args: { env: "e", version: "v" }, state: hs, cwd: "/repo", isError: false, invalidate() {} };
+	h.renderCall(hctx.args, theme, hctx);
+	h.renderResult(ok("x"), { expanded: false, isPartial: true }, theme, hctx); // partial frames do not call summarize
+	assert.equal(calls, 0);
+	const final = h.renderResult(ok("x"), { expanded: false, isPartial: false }, theme, hctx).render(80).map(strip).join("");
+	assert.deepEqual(final.includes("OWN RESULT"), true, "a throw on a finished call falls back");
+	assert.equal(hs.rowSpecFailed, true, "and latches for the rest of that call");
+});
+
+test("a throw on a finished call latches it; a spec that keeps failing is skipped for new calls", () => {
+	api.installHost();
+	const { pi, resolvers } = fakePi();
+	installToolRenderers(pi);
+	const own = {
+		renderShell: "default",
+		renderCall: () => ({ invalidate() {}, render: () => ["OWN CALL"] }),
+		renderResult: () => ({ invalidate() {}, render: () => ["OWN RESULT"] }),
+	};
+	api.registerToolRows({
+		flaky_tool: deployRow({
+			summarize: () => {
+				throw new Error("boom");
+			},
+		}),
+	});
+	const shellOf = () => resolve(resolvers, "flaky_tool", own).renderShell;
+	for (let i = 0; i < api.TOOL_ROW_FAILURE_LIMIT; i++) {
+		const got = resolve(resolvers, "flaky_tool", own);
+		assert.equal(got.renderShell, "self", "still styled while it has not failed too often");
+		const ctx: any = { args: { env: "e", version: "v" }, state: {}, cwd: "/repo", isError: false, invalidate() {} };
+		got.renderCall(ctx.args, theme, ctx);
+		got.renderResult(ok("x"), { expanded: false, isPartial: false }, theme, ctx);
+	}
+	// Now new calls get the tool's own renderers, and so its own shell.
+	assert.equal(shellOf(), "default");
+	assert.equal(resolve(resolvers, "flaky_tool", own), own);
+	// Registering the spec again gives it a fresh start.
+	const spec = api.toolRowFor("flaky_tool")!;
+	api.registerToolRows({ flaky_tool: spec });
+	assert.equal(shellOf(), "self");
 });
 
 test("halo itself knows no extension's tools: SPECS holds only pi's built-in tools", () => {

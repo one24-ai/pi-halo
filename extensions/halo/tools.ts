@@ -20,7 +20,7 @@
 import { type ExtensionAPI, renderDiff, type Theme, type ToolRenderers } from "@earendil-works/pi-coding-agent";
 import { type Component, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import { relative } from "node:path";
-import { toolRowFor, type ToolRowSpec } from "./api.ts";
+import { noteToolRowFailure, toolRowBroken, toolRowFor, type ToolRowSpec } from "./api.ts";
 import { icon, type IconLike, type IconName, resolveIcon } from "./icons.ts";
 import { primary, sanitize, sanitizeLines, scrubText, shade, stripEscapes } from "./palette.ts";
 import { type BashOutput, bashPeek, foldLines, formatWallTime, LIVE_TAIL_LINES, liveTail, liveVisible, liveWaitMs, parseBashOutput } from "./bash-output.ts";
@@ -177,10 +177,13 @@ export function countLines(text: unknown): number {
 /** Indent body lines two columns, under the title text, as bash output is. */
 const indented = (lines: string[]) => lines.map((l) => `  ${l}`);
 
-/** The first `n` of `lines`, with a dim note of what is left and how to open it. */
-function clipped(lines: string[], n: number, theme: Theme, hint: boolean): string[] {
-	if (lines.length <= n) return lines;
-	const note = `… ${lines.length - n} more lines${hint ? " · ctrl+o or click to expand" : ""}`;
+/**
+ * The first `n` of `lines`, with a dim note of what is left and how to open it. `total` is the
+ * true number of lines when `lines` is only the start of a longer list.
+ */
+function clipped(lines: string[], n: number, theme: Theme, hint: boolean, total = lines.length): string[] {
+	if (total <= n) return lines;
+	const note = `… ${total - n} more lines${hint ? " · ctrl+o or click to expand" : ""}`;
 	return [...lines.slice(0, n), theme.fg("dim", note)];
 }
 
@@ -509,7 +512,8 @@ export function fromRowSpec(row: ToolRowSpec): Spec {
 			? (r, a, t) => {
 					const lines = row.expand!(r, a, t);
 					if (!Array.isArray(lines)) return [];
-					return indented(clipped(lines.map(outside), ROW_EXPAND_LINES, t, false));
+					// Clean only what can be shown (the cap plus one, so the cut is seen), not a huge list.
+					return indented(clipped(lines.slice(0, ROW_EXPAND_LINES + 1).map(outside), ROW_EXPAND_LINES, t, false, lines.length));
 				}
 			: undefined,
 	};
@@ -528,32 +532,47 @@ function stacked(first: Component, second: Component): Component {
 
 /**
  * Renderers for a tool that belongs to another extension, drawn from the row spec it registered.
- * If the spec throws (while drawing the call or the result), this call and every later frame of it
- * are drawn by the tool's own renderers (`next()`); when it has none, the error goes to pi, which
- * draws its plain fallback. A broken spec therefore costs the tool its styled row and nothing else.
+ *
+ * If the spec throws, that frame is drawn by the tool's own renderers (`next()`). A throw while the
+ * call's arguments or output are still arriving (a partial frame) is not held against the spec:
+ * the next frame tries it again, since half-received arguments are often what it choked on. A
+ * throw on a finished call latches: the rest of that call is drawn by the tool's own renderers, and
+ * the failure is counted against the spec (see `toolRowBroken`; after a few, new calls skip it).
+ * When the tool has no renderers of its own, the error goes to pi, which draws its plain fallback.
+ *
+ * One limit: pi reads `renderShell` once, when it creates the row, and cannot change it later. A
+ * call that falls back after it started is therefore still inside halo's own shell (`"self"`);
+ * only a call that is resolved when the spec is already known to be broken gets the tool's shell.
  */
-function rowRenderers(row: ToolRowSpec, next: () => ToolRenderers | undefined): ToolRenderers {
-	let inner: ReturnType<typeof makeRenderers> | undefined;
+function rowRenderers(row: ToolRowSpec, next: () => ToolRenderers | undefined): ToolRenderers | undefined {
+	let inner: ReturnType<typeof makeRenderers>;
 	try {
 		inner = makeRenderers(fromRowSpec(row), () => process.cwd());
 	} catch {
-		inner = undefined;
+		return next(); // not usable: the tool's own renderers, with its own shell
 	}
-	const failed = (context: any): boolean => inner === undefined || context?.state?.rowSpecFailed === true;
-	/** Remember that the spec failed for this call; the styled call row, if any, is no longer drawn. */
-	const fail = (context: any): void => {
-		if (!context?.state) return;
-		context.state.rowSpecFailed = true;
-		context.state.callRow = undefined;
+	// Per call: kept in the call's renderer state when pi gives one, else for this resolution.
+	let latchedHere = false;
+	const isLatched = (context: any): boolean => latchedHere || context?.state?.rowSpecFailed === true;
+	/** Hold a failure against the spec when the call is finished; the styled call row, if any, is dropped. */
+	const fail = (context: any, partial: boolean): void => {
+		if (partial) return;
+		latchedHere = true;
+		noteToolRowFailure(row);
+		if (context?.state) {
+			context.state.rowSpecFailed = true;
+			context.state.callRow = undefined;
+		}
 	};
 	return {
 		renderShell: "self",
 		renderCall(args, theme, context) {
-			if (!failed(context)) {
+			if (!isLatched(context)) {
 				try {
-					return inner!.renderCall(args, theme, context);
+					return inner.renderCall(args, theme, context);
 				} catch {
-					fail(context);
+					// Partial while the arguments are still streaming (pi sets argsComplete when they are whole).
+					fail(context, context?.isPartial === true && context?.argsComplete !== true);
 				}
 			}
 			const render = next()?.renderCall;
@@ -563,11 +582,11 @@ function rowRenderers(row: ToolRowSpec, next: () => ToolRenderers | undefined): 
 		renderResult(result, options, theme, context) {
 			// Set while the styled call row is on screen (and hidden by a result that began to draw).
 			const styledCall = context?.state?.callRow !== undefined;
-			if (!failed(context)) {
+			if (!isLatched(context)) {
 				try {
-					return inner!.renderResult(result, options, theme, context);
+					return inner.renderResult(result, options, theme, context);
 				} catch {
-					fail(context);
+					fail(context, options?.isPartial === true);
 				}
 			}
 			const own = next();
@@ -581,17 +600,19 @@ function rowRenderers(row: ToolRowSpec, next: () => ToolRenderers | undefined): 
 
 /**
  * Draw the built-in tools with halo's rows, and any other tool whose extension registered a row
- * spec (`registerToolRows`). A resolver answers for these names and passes every other tool to
- * `next()`, so pi keeps the tool definitions, their settings (shell prefix, shell path, image
- * resizing) and which tools are active; only the drawing changes. The resolver wins over a tool's
- * own renderers. Halo's own specs win over a registered spec of the same name. The registered specs
- * are looked up when a call first appears, so load order does not matter.
+ * spec (`registerToolRows`). A resolver answers for these
+ * names and passes every other tool to `next()`, so pi keeps the tool definitions, their settings
+ * (shell prefix, shell path, image resizing) and which tools are active; only the drawing changes.
+ * The resolver wins over a tool's own renderers. Halo's own specs win over a registered spec of
+ * the same name. The registered specs are looked up when a call first appears, so load order does
+ * not matter. A spec that has failed on several finished calls is skipped and the tool is drawn by
+ * its own renderers, shell included.
  */
 export function installToolRenderers(pi: ExtensionAPI): void {
 	const drawn = Object.fromEntries(Object.keys(SPECS).map((n) => [n, { ...makeRenderers(SPECS[n]!, () => process.cwd()), renderShell: "self" as const }]));
 	pi.registerToolRenderer((toolName, next) => {
 		if (Object.hasOwn(drawn, toolName)) return drawn[toolName];
 		const row = toolRowFor(toolName);
-		return row ? rowRenderers(row, next) : next();
+		return row && !toolRowBroken(row) ? rowRenderers(row, next) : next();
 	});
 }

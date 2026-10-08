@@ -39,7 +39,7 @@ function reset(): void {
 	for (const e of reg.widgets.values()) if (e.timer) clearInterval(e.timer);
 	reg.widgets.clear();
 	reg.disabled.clear();
-	reg.toolRows.length = 0;
+	reg.toolRows = [];
 	reg.ctx = undefined;
 	reg.apiVersion = undefined;
 	reg.register = undefined;

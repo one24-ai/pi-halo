@@ -26,7 +26,7 @@
  */
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import type { PendingRegistration, PendingToolRows, Registry, ToolRowSpecs, WidgetHandle, WidgetSpec } from "./api.ts";
+import type { PendingRegistration, PendingToolRows, Registry, ToolRowsOptions, ToolRowSpecs, WidgetHandle, WidgetSpec } from "./api.ts";
 import { type BrandSpec, setBrand } from "./brand.ts";
 import { type ProviderStatusSpec, setProviderStatus } from "./provider.ts";
 
@@ -208,17 +208,22 @@ export function registerWidget(pi: ExtensionAPI, spec: WidgetSpec, ctx?: Extensi
  * over when it does) and does nothing when halo is not installed: the tools keep their own rows.
  * halo draws the built-in tools (read, write, edit, bash, grep, find, ls) itself and ignores a spec
  * for those names. See ToolRowSpec in api.ts for what a spec may return.
+ *
+ * Pass `{ id }` if this can run more than once in a process (on every session_start, or after
+ * /reload): registering again with the same id replaces the earlier rows instead of adding more.
+ * Without an id, call the returned function (on session_shutdown, say) before registering again.
  */
-export function registerToolRows(specs: ToolRowSpecs): () => void {
+export function registerToolRows(specs: ToolRowSpecs, options?: ToolRowsOptions): () => void {
 	let undo: (() => void) | undefined;
 	let removed = false;
 	const reg = (globalThis as unknown as Record<symbol, Registry | undefined>)[REGISTRY];
 	if (typeof reg?.registerToolRows === "function" && typeof reg.toolRowsVersion === "number" && reg.toolRowsVersion >= CLIENT_TOOL_ROWS_VERSION) {
-		undo = reg.registerToolRows(specs);
+		undo = reg.registerToolRows(specs, options);
 	} else {
 		const g = globalThis as unknown as Record<symbol, PendingToolRows[] | undefined>;
 		const entry: PendingToolRows = {
 			specs,
+			id: options?.id,
 			attach: (unregister) => {
 				undo = unregister;
 				if (removed) unregister();
@@ -275,5 +280,5 @@ export type { DiffAction, DiffActionContext, DiffFileInfo, DiffHunkInfo, OpenDif
 export type { ProviderMeter, ProviderStatusSpec } from "./provider.ts";
 export type { BrandColors, BrandSpec, BrandSurfaces } from "./brand.ts";
 export type { IconLike } from "./icons.ts";
-export type { ToolRowResult, ToolRowSpec, ToolRowSpecs } from "./api.ts";
+export type { ToolRowResult, ToolRowsOptions, ToolRowSpec, ToolRowSpecs } from "./api.ts";
 export type { WidgetAction, WidgetHandle, WidgetSpec, WidgetView, WidgetRenderContext, WidgetSlot, WidgetColor, WidgetLevel } from "./api.ts";

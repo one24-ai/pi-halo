@@ -214,7 +214,12 @@ export interface ToolRowResult {
  * draw that call with the tool's own renderer instead.
  */
 export interface ToolRowSpec {
-	/** Glyph in front of the row. A string is used as given with a Nerd Font and dropped without one; `{ nerd, plain }` gives one for each icon set. Omit for no glyph. */
+	/**
+	 * Glyph in front of the row. A string is used as given in the Nerd Font set; in the plain set
+	 * its private-use (Nerd Font) characters are dropped, so a string of ordinary characters such as
+	 * "#" is kept in both and a bare Nerd Font glyph shows nothing. `{ nerd, plain }` gives one for
+	 * each icon set. Omit for no glyph.
+	 */
 	icon?: IconLike;
 	/** Short verb or noun before the description, drawn in the text colour. May be empty. */
 	title: string;
@@ -228,6 +233,22 @@ export interface ToolRowSpec {
 
 /** Tool row specs by tool name. */
 export type ToolRowSpecs = Record<string, ToolRowSpec>;
+
+/** Options for `registerToolRows`. */
+export interface ToolRowsOptions {
+	/**
+	 * Names the registrant. Registering again with the same id replaces that registrant's earlier
+	 * group, so a package that registers on every `session_start` (and again after /reload) never
+	 * piles up groups. Without an id each call adds a group that lives until its remover is called.
+	 */
+	id?: string;
+}
+
+/** One registration: the specs of one `registerToolRows` call. */
+export interface ToolRowGroup {
+	id?: string;
+	specs: Map<string, ToolRowSpec>;
+}
 
 /** Shared state between halo and widget extensions. */
 export interface Registry {
@@ -253,9 +274,9 @@ export interface Registry {
 	/** Set by `installHost()`: the version of the tool row API. Absent when the host predates it, so a client can feature-detect. */
 	toolRowsVersion?: number;
 	/** Set by `installHost()`: registers tool row specs and returns a function that removes them. */
-	registerToolRows?: (specs: ToolRowSpecs) => () => void;
-	/** Registered tool row groups, oldest first. Read through `toolRowFor`. */
-	toolRows: Array<Map<string, ToolRowSpec>>;
+	registerToolRows?: (specs: ToolRowSpecs, options?: ToolRowsOptions) => () => void;
+	/** Registered tool row groups, oldest first. Absent until the first registration; read through `toolRowGroups`. */
+	toolRows?: ToolRowGroup[];
 }
 
 /** Bumped on a breaking change to the registry or WidgetSpec; client.ts checks it. */
@@ -275,6 +296,8 @@ export interface PendingRegistration {
 /** Tool rows registered (through client.ts or the raw protocol) before halo had loaded. */
 export interface PendingToolRows {
 	specs: ToolRowSpecs;
+	/** The registrant's id, as in `ToolRowsOptions`. */
+	id?: string;
 	/** Hands the host's unregister function back to the registrant once the host has taken the rows. */
 	attach(unregister: () => void): void;
 }
@@ -306,7 +329,7 @@ export function drainPending(): void {
 	}
 	for (const item of pendingToolRowsList().splice(0)) {
 		try {
-			item.attach(registerToolRows(item.specs));
+			item.attach(registerToolRows(item.specs, { id: item.id }));
 		} catch {
 			// one bad registration must not stop the others
 		}
@@ -370,12 +393,36 @@ export function getRegistry(): Registry {
 		listeners: new Set(),
 		version: 0,
 		disabled: loadDisabled(),
-		toolRows: [],
 	};
 	// A registry created by an older halo in the same process lacks newer fields.
 	g[KEY]!.disabled ??= loadDisabled();
-	g[KEY]!.toolRows ??= [];
 	return g[KEY]!;
+}
+
+/** The registered tool row groups, oldest first (created on first use, so an older registry works). */
+export function toolRowGroups(): ToolRowGroup[] {
+	const reg = getRegistry();
+	return (reg.toolRows ??= []);
+}
+
+/** A spec that failed this many finished calls is no longer used until it is registered again. */
+export const TOOL_ROW_FAILURE_LIMIT = 3;
+const toolRowFailures = new WeakMap<ToolRowSpec, number>();
+
+/** Count a failure of `spec` on a finished call (not while arguments or output were still arriving). */
+export function noteToolRowFailure(spec: ToolRowSpec): void {
+	toolRowFailures.set(spec, (toolRowFailures.get(spec) ?? 0) + 1);
+}
+
+/** Whether `spec` failed too many finished calls to be used for new ones. */
+export function toolRowBroken(spec: ToolRowSpec): boolean {
+	return (toolRowFailures.get(spec) ?? 0) >= TOOL_ROW_FAILURE_LIMIT;
+}
+
+/** Whether `spec` has the shape halo needs: a string title, functions to describe and summarize, and `expand` a function if given. */
+function isToolRowSpec(spec: unknown): spec is ToolRowSpec {
+	const s = spec as Partial<ToolRowSpec> | null;
+	return !!s && typeof s === "object" && typeof s.title === "string" && typeof s.describe === "function" && typeof s.summarize === "function" && (s.expand === undefined || typeof s.expand === "function");
 }
 
 /**
@@ -388,30 +435,43 @@ export function getRegistry(): Registry {
  *
  * halo's own rows for pi's built-in tools (read, write, edit, bash, grep, find, ls) always win: a
  * spec registered under one of those names is never used. For any other name the most recently
- * registered spec wins, and removing it brings back the one before it. Entries that are not specs
- * are ignored.
+ * registered spec wins, and removing it brings back the one before it. An entry is used only if
+ * it has a string `title`, function `describe` and `summarize`, and `expand` is a function when
+ * given; any other entry is skipped.
+ *
+ * Pass `{ id }` when the registrant can run more than once in a process (an extension that
+ * registers on every `session_start`, or is loaded again by /reload): registering again with the
+ * same id replaces its earlier group instead of adding another. Without an id, call the returned
+ * remover (for example on `session_shutdown`) before registering again.
  */
-export function registerToolRows(specs: ToolRowSpecs): () => void {
-	const reg = getRegistry();
-	const group = new Map<string, ToolRowSpec>();
+export function registerToolRows(specs: ToolRowSpecs, options?: ToolRowsOptions): () => void {
+	const groups = toolRowGroups();
+	const id = typeof options?.id === "string" && options.id ? options.id : undefined;
+	const group: ToolRowGroup = { id, specs: new Map() };
 	for (const [name, spec] of Object.entries(specs ?? {})) {
-		if (name && spec && typeof spec === "object") group.set(name, spec);
+		if (!name || !isToolRowSpec(spec)) continue;
+		toolRowFailures.delete(spec); // registering again gives a spec a fresh start
+		group.specs.set(name, spec);
 	}
-	reg.toolRows.push(group);
-	reg.requestRender();
+	if (id !== undefined) {
+		for (let i = groups.length - 1; i >= 0; i--) if (groups[i]!.id === id) groups.splice(i, 1);
+	}
+	groups.push(group);
+	getRegistry().requestRender();
 	return () => {
-		const i = reg.toolRows.indexOf(group);
+		const live = toolRowGroups();
+		const i = live.indexOf(group);
 		if (i < 0) return;
-		reg.toolRows.splice(i, 1);
-		reg.requestRender();
+		live.splice(i, 1);
+		getRegistry().requestRender();
 	};
 }
 
 /** The registered row spec for a tool, newest registration first, or undefined. */
 export function toolRowFor(toolName: string): ToolRowSpec | undefined {
-	const groups = getRegistry().toolRows;
+	const groups = toolRowGroups();
 	for (let i = groups.length - 1; i >= 0; i--) {
-		const spec = groups[i]!.get(toolName);
+		const spec = groups[i]!.specs.get(toolName);
 		if (spec) return spec;
 	}
 	return undefined;
