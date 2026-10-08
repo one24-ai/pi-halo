@@ -15,7 +15,9 @@
  *   widget falls back to ctx.ui.setStatus(id, "<label> <text>"), updated on `refreshMs`. Only
  *   the one-line view is shown there: no detail lines, colours or caching.
  *
- * Import it as "pi-halo/client" (the package's `exports` map). It is not a single file: it loads
+ * Import it as "pi-halo/client" (the package's `exports` map), which resolves to compiled
+ * JavaScript with type declarations (dist/), so a consumer's plain Node tests and tsc need no
+ * TypeScript loader. pi itself loads this package's extensions from the .ts sources. It loads
  * two value modules, `./brand.ts` and `./provider.ts`, and `../diff/host.ts` for the diff view API,
  * and the rest of what it imports is types. To vendor it, copy those four files and keep the
  * `halo/` and `diff/` folder layout, or import it from the package instead. Any one of the

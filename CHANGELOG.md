@@ -4,6 +4,10 @@ All notable changes to pi-halo are listed here. The format follows [Keep a Chang
 
 ## [Unreleased]
 
+### Changed
+
+- **Breaking:** the package exports (`pi-halo/client`, `api`, `brand`, `icons`, `provider`, `aws`) now resolve to compiled JavaScript in `dist/` with type declarations, instead of the `.ts` sources. A package that depends on pi-halo can now import it from plain `node --test` and type-check it with `tsc`; before, Node refused to strip types from files under `node_modules`. Deep imports of `pi-halo/extensions/...` paths are not part of the API and may stop working. pi still loads pi-halo's own extensions from the `.ts` sources, so nothing changes for users of the TUI.
+
 ## [0.1.1] - 2026-10-08
 
 ### Security

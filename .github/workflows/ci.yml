@@ -24,3 +24,8 @@ jobs:
       # The tests and type check link the installed pi's packages; install the pi version halo targets.
       - run: pnpm add --global @earendil-works/pi-coding-agent@1.1.0
       - run: pnpm check
+      - name: The packed tarball has the compiled exports
+        run: |
+          pnpm pack
+          tar tzf pi-halo-*.tgz | grep -q '^package/dist/halo/client.js$'
+          tar tzf pi-halo-*.tgz | grep -q '^package/dist/halo/client.d.ts$'

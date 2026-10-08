@@ -93,7 +93,7 @@ export default function (pi: ExtensionAPI) {
 }
 ```
 
-`pi-halo/client` is resolved like any npm import, from the widget's own folder, so the widget lives in a pi package that has pi-halo in its `node_modules`. A single file in `~/.pi/agent/extensions/` can't import it. A minimal package:
+`pi-halo/client` is resolved like any npm import, from the widget's own folder, so the widget lives in a pi package that has pi-halo in its `node_modules`. A single file in `~/.pi/agent/extensions/` can't import it. The exports are compiled JavaScript with type declarations, so the package's own tests can import them with plain `node --test` and type-check with `tsc`. A minimal package:
 
 ```json
 {
@@ -101,7 +101,7 @@ export default function (pi: ExtensionAPI) {
   "type": "module",
   "keywords": ["pi-package"],
   "pi": { "extensions": ["./index.ts"] },
-  "dependencies": { "pi-halo": "<the same source you installed pi-halo from>" }
+  "dependencies": { "pi-halo": "^0.2.0" }
 }
 ```
 
@@ -227,7 +227,8 @@ Other unsupported hooks, all checked on pi 1.1.0:
 pnpm install          # typescript + @types/node only
 pnpm test             # unit tests (node --test, no pi needed)
 pnpm typecheck        # links the installed pi's packages into node_modules, then tsc
-pnpm check            # both, as CI runs them
+pnpm build            # compiles the exports to dist/ (JavaScript and type declarations)
+pnpm check            # tests, type check and build, as CI runs them
 ```
 
 Screenshots (pi in a detached tmux pane, replayed to PNG with pyte + Pillow from public PyPI):
