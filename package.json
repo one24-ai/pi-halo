@@ -55,8 +55,7 @@
   ],
   "publishConfig": {
     "access": "public",
-    "registry": "https://registry.npmjs.org/",
-    "provenance": true
+    "registry": "https://registry.npmjs.org/"
   },
   "scripts": {
     "test": "node scripts/link-pi.mjs && node --experimental-strip-types --no-warnings --test test/*.test.ts",

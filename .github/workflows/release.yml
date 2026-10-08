@@ -4,9 +4,12 @@ on:
   push:
     tags: ["v*.*.*"]
 
+# Published with npm trusted publishing (OIDC): no npm token is stored anywhere. npm accepts the
+# run because the package's trusted publisher names this repository, this workflow file and the
+# "npm" environment, and it adds provenance on its own. See RELEASING.md.
 permissions:
   contents: write # create the GitHub release
-  id-token: write # npm provenance
+  id-token: write # the OIDC token npm exchanges for a short-lived publish token
 
 jobs:
   publish:
@@ -20,16 +23,15 @@ jobs:
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 24
-          registry-url: https://registry.npmjs.org
       - run: pnpm install --frozen-lockfile
       - run: pnpm add --global @earendil-works/pi-coding-agent@1.1.0
       - run: pnpm check
       - name: Tag matches package.json
         run: |
           test "v$(node -p 'require("./package.json").version')" = "$GITHUB_REF_NAME"
-      - run: pnpm publish --no-git-checks
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      # Trusted publishing needs npm 11.5.1 or later and is documented for `npm publish` only.
+      - run: npm install --global npm@12.2.0
+      - run: npm publish
       - name: GitHub release from the changelog
         env:
           GH_TOKEN: ${{ github.token }}

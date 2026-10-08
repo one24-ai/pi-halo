@@ -9,7 +9,7 @@ unchanged everywhere.** No remote or registry gets a build the others don't have
 | Place | What | Who uses it |
 |---|---|---|
 | `github.com/one24-ai/pi-halo` | The canonical repository: issues, pull requests, CI, tags | Everyone |
-| npmjs.com, `pi-halo` | The published package, built and published by CI from a tag | `pi install npm:pi-halo@X.Y.Z` |
+| npmjs.com, `pi-halo` | The published package, built and published by CI from a tag with npm trusted publishing | `pi install npm:pi-halo@X.Y.Z` |
 | Any mirror (a company git server, a company npm registry) | A read-only copy of the same tags and the same tarball | People who can only reach that network |
 
 Mirrors are downstream only. Changes are made in `github.com/one24-ai/pi-halo` and flow out; nothing is committed to a mirror directly. Code that is specific to one company does not go into pi-halo at all: it lives in a separate package that depends on pi-halo (a brand, extra widgets, internal tools).
@@ -35,7 +35,9 @@ Then:
 git push origin main --follow-tags
 ```
 
-The tag starts `.github/workflows/release.yml`, which runs the checks again, verifies the tag matches `package.json`, publishes to npm with provenance, and creates the GitHub release from the changelog entry.
+The tag starts `.github/workflows/release.yml`, which runs the checks again, verifies the tag matches `package.json`, publishes to npm, and creates the GitHub release from the changelog entry.
+
+Publishing uses [npm trusted publishing](https://docs.npmjs.com/trusted-publishers/) (OIDC): no npm token is stored in GitHub. npm accepts the run because the package's trusted publisher names this repository, `release.yml` and the `npm` environment, and it adds a provenance attestation on its own. If a release run fails at `npm publish` with a 404 or 403, check those three names on npmjs.com first: they must match exactly.
 
 ## Mirrors
 
@@ -57,5 +59,23 @@ A registry that proxies npmjs.com (most company registries do) needs nothing: `p
 
 ## One-time setup
 
-- npm: the `pi-halo` name is published by a CI token. Create an npm automation token (or a granular token limited to `pi-halo`) and save it as the `NPM_TOKEN` secret of the `npm` environment in the GitHub repository. Turn on two-factor authentication for the npm account.
-- GitHub: protect `main` (require the CI check), and restrict who can push `v*` tags.
+These were done once, when 0.1.0 was published, and are recorded here in case they need redoing.
+
+1. **First publish by hand.** npm can only attach a trusted publisher to a package that already exists, so the first version was published from a maintainer's machine with 2FA, from the tag:
+
+   ```bash
+   git checkout v0.1.0 && pnpm install --frozen-lockfile && pnpm check
+   npm publish --provenance=false   # prompts for the 2FA code
+   ```
+
+2. **Trusted publisher.** On npmjs.com, package `pi-halo`, Settings, Trusted Publisher, GitHub Actions: organization `one24-ai`, repository `pi-halo`, workflow `release.yml`, environment `npm`. Or, with npm 11.15 or later and 2FA:
+
+   ```bash
+   npm trust github pi-halo --file release.yml --repo one24-ai/pi-halo --env npm --allow-publish
+   ```
+
+   A new trusted publisher must complete its first publish within 2 days, so cut the next release soon after.
+
+3. **No tokens.** Do not add an npm token to the repository. npm is retiring 2FA-bypass tokens for publishing (planned for January 2027), and trusted publishing does not need one.
+
+4. **GitHub.** `main` requires the CI check and cannot be force-pushed or deleted. `v*` tags can only be created, moved or deleted by admins, because pushing one publishes. The `npm` environment only runs for `v*.*.*` tags.
