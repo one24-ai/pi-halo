@@ -26,7 +26,7 @@ pi install /path/to/pi-halo                         # a local checkout
 
 Pin a version: pi keeps a pinned npm version or git tag until you change it, so an update never arrives by surprise. See the [changelog](CHANGELOG.md) before moving to a new one.
 
-pi-halo replaces pi's header, footer and editor, so it does not combine with another package that does the same (such as pi-open-tui): keep one of them in `packages`.
+pi-halo replaces pi's header, footer and editor, so it does not combine with another package that replaces any of them (pi-open-tui is one): keep only one such package in `packages`.
 
 **Icons.** pi-halo draws with plain characters by default (`● ○ ▲ × • → ↑ ↓` and half-block pill caps), which every common monospace font has, so it works in any terminal. With a [Nerd Font](https://www.nerdfonts.com) in the terminal it can draw real icons instead (a robot, a branch, a file, a clock, round pill caps). Switch with `/halo icons nerd|plain|auto`; `auto` forgets the choice. The setting is saved in `halo.json`, and the `PI_HALO_ICONS=nerd|plain` environment variable overrides it. A brand can set the default for its users with `icons: "nerd"` (see Branding). The plain set takes the same number of cells as the Nerd one, so nothing moves when you switch. Where a Nerd icon is only decoration (telemetry, the mode pill, the diff header) the plain set shows the words alone.
 
@@ -219,7 +219,7 @@ Other unsupported hooks, all checked on pi 1.1.0:
 
 - Prompt bars: patches `UserMessageComponent.prototype.render`. The original is restored on `/halo off` and on shutdown.
 - Tool rows: a renderer resolver (`pi.registerToolRenderer`) draws the built-in tools' calls; pi's own tool definitions, settings and active tool set are not touched.
-- Thinking peek: finds the latest assistant message component in the TUI tree, as pi-open-tui does.
+- Thinking peek: finds the latest assistant message component in the TUI tree.
 
 ## Development
 
