@@ -4,6 +4,8 @@ All notable changes to pi-halo are listed here. The format follows [Keep a Chang
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-10-08
+
 ### Changed
 
 - pi-halo describes itself as a workbench for pi (an interface, git workflows and a widget platform) instead of an OpenCode-style TUI, in the README and the npm description. OpenCode is credited as the inspiration for the interface.
@@ -37,7 +39,8 @@ First public release.
 - Plain and Nerd Font icon sets (`/halo icons`).
 - Sanitizing of untrusted text (file contents, tool output, git and forge output, session names, widget text) before it reaches the terminal.
 
-[Unreleased]: https://github.com/one24-ai/pi-halo/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/one24-ai/pi-halo/compare/v0.2.1...HEAD
+[0.2.1]: https://github.com/one24-ai/pi-halo/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/one24-ai/pi-halo/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/one24-ai/pi-halo/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/one24-ai/pi-halo/releases/tag/v0.1.0
