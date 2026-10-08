@@ -4,6 +4,8 @@ All notable changes to pi-halo are listed here. The format follows [Keep a Chang
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-10-08
+
 ### Changed
 
 - **Breaking:** the package exports (`pi-halo/client`, `api`, `brand`, `icons`, `provider`, `aws`) now resolve to compiled JavaScript in `dist/` with type declarations, instead of the `.ts` sources. A package that depends on pi-halo can now import it from plain `node --test` and type-check it with `tsc`; before, Node refused to strip types from files under `node_modules`. Deep imports of `pi-halo/extensions/...` paths are not part of the API and may stop working. pi still loads pi-halo's own extensions from the `.ts` sources, so nothing changes for users of the TUI.
@@ -31,6 +33,7 @@ First public release.
 - Plain and Nerd Font icon sets (`/halo icons`).
 - Sanitizing of untrusted text (file contents, tool output, git and forge output, session names, widget text) before it reaches the terminal.
 
-[Unreleased]: https://github.com/one24-ai/pi-halo/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/one24-ai/pi-halo/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/one24-ai/pi-halo/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/one24-ai/pi-halo/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/one24-ai/pi-halo/releases/tag/v0.1.0
