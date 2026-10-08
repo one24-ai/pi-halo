@@ -1,6 +1,6 @@
 {
   "name": "pi-halo",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "description": "A workbench for pi: an interface, git workflows and a widget platform for everyday engineering. Sidebar and home screen, Build/Plan modes, ctrl+x leader keys and a ctrl+p palette, a git diff view, git commands that draft commit messages and pull requests, and a widget and brand API for other packages.",
   "type": "module",
   "license": "MIT",

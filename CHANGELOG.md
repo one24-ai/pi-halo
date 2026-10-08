@@ -4,6 +4,8 @@ All notable changes to pi-halo are listed here. The format follows [Keep a Chang
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-10-08
+
 ### Added
 
 - Tool rows for other extensions' tools: `registerToolRows(specs)` in `pi-halo/client` (and `registerToolRows` plus `toolRowsVersion` on `globalThis[Symbol.for("pi-halo/registry")]` for a package that does not depend on pi-halo) has halo draw a tool's calls as one-line rows with an icon, title, description, outcome and an expanded view. Specs are `ToolRowSpec` (`icon`, `title`, `describe`, `summarize`, `expand`), exported as types from `pi-halo/client`. Everything a spec returns is sanitized, a spec that throws falls back to the tool's own renderer, registration works in any load order and returns a function that removes it, and halo's rows for pi's built-in tools cannot be overridden. `registerToolRows(specs, { id })` takes an optional owner id: registering again with the same id replaces that registrant's earlier rows, so a package that registers on every `session_start` or after /reload does not pile up groups. Entries need a string `title` and function `describe` and `summarize` (and `expand`, if given) or they are skipped. A spec that throws while a call's arguments or output are still arriving is retried on the next frame; one that fails on three finished calls is skipped for new calls, which then use the tool's own renderers and shell. This is a new capability, not a change to `apiVersion`: check `toolRowsVersion`.
@@ -49,7 +51,8 @@ First public release.
 - Plain and Nerd Font icon sets (`/halo icons`).
 - Sanitizing of untrusted text (file contents, tool output, git and forge output, session names, widget text) before it reaches the terminal.
 
-[Unreleased]: https://github.com/one24-ai/pi-halo/compare/v0.2.1...HEAD
+[Unreleased]: https://github.com/one24-ai/pi-halo/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/one24-ai/pi-halo/compare/v0.2.1...v0.3.0
 [0.2.1]: https://github.com/one24-ai/pi-halo/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/one24-ai/pi-halo/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/one24-ai/pi-halo/compare/v0.1.0...v0.1.1
