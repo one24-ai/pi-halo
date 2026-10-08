@@ -4,6 +4,8 @@ All notable changes to pi-halo are listed here. The format follows [Keep a Chang
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-10-08
+
 ### Security
 
 - Releases are published by CI with npm trusted publishing (OIDC) and carry a provenance attestation. No npm token is stored in the repository.
@@ -25,5 +27,6 @@ First public release.
 - Plain and Nerd Font icon sets (`/halo icons`).
 - Sanitizing of untrusted text (file contents, tool output, git and forge output, session names, widget text) before it reaches the terminal.
 
-[Unreleased]: https://github.com/one24-ai/pi-halo/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/one24-ai/pi-halo/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/one24-ai/pi-halo/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/one24-ai/pi-halo/releases/tag/v0.1.0

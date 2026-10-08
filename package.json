@@ -1,6 +1,6 @@
 {
   "name": "pi-halo",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "An OpenCode-style TUI and engineering workflow tools for pi: right sidebar, one-line footer, Build/Plan modes, ctrl+x leader keys, ctrl+p command palette, a git diff view, git commands that draft commit messages and pull requests, and a widget API. The brand (name, mark, colours, startup art) is replaceable from another package.",
   "type": "module",
   "license": "MIT",
